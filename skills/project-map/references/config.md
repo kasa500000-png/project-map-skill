@@ -18,6 +18,10 @@ Use this reference when the inferred names are unclear or when a real relationsh
   "kinds": {
     "src/data/tasks.ts": "data"
   },
+  "routes": {
+    "app/tasks/page.tsx": "/tasks",
+    "app/tasks/[id]/page.tsx": "/tasks/[id]"
+  },
   "relationships": [
     {
       "source": "app/tasks/page.tsx",
@@ -37,11 +41,12 @@ Use this reference when the inferred names are unclear or when a real relationsh
 | `labels` | Object: relative file path → string | Human-readable feature names; at most 120 characters per label. |
 | `descriptions` | Object: relative file path → string | Short feature descriptions; at most 400 characters each. |
 | `kinds` | Object: relative file path → kind | Override the inferred display category. |
+| `routes` | Object: relative file path → internal route | Assign a screen a root-relative route such as `/tasks` or `/tasks/[id]`; invalid or external routes are ignored. |
 | `relationships` | Array of objects | Add declared source-to-target connections; the first 1,000 entries are considered. |
 
 Valid kinds are `screen`, `component`, `service`, `data`, `config`, `style`, and `module`. Unknown kinds are ignored in favor of the inferred kind.
 
-Each relationship needs `source` and `target`, both exact file IDs from the current map. Optional `kind` may be `uses`, `reads`, `writes`, or `imports`; another or omitted value becomes `uses`. Optional `reason` is a short explanation, retaining at most 240 characters. A relationship is directed: its source depends on, uses, reads, or writes its target. Self-connections and entries whose files were not scanned are ignored.
+Each relationship needs `source` and `target`, both exact file IDs from the current map. Optional `kind` may be `navigates`, `uses`, `reads`, `writes`, or `imports`; another or omitted value becomes `uses`. Optional `reason` is a short explanation, retaining at most 240 characters. A relationship is directed: its source navigates to, depends on, uses, reads, or writes its target. Self-connections and entries whose files were not scanned are ignored. A navigation declaration should connect screen nodes and explain the user action.
 
 Use forward slashes in paths, including on Windows. Paths must be relative to the selected project root. For example, selecting the monorepo root requires `apps/web/app/tasks/page.tsx`; selecting `apps/web` requires `app/tasks/page.tsx`.
 
@@ -56,7 +61,7 @@ Ask for the intended product name when it cannot be inferred from code. Do not i
 
 ## Limits and trust
 
-- Configuration adjusts labels, categories, and connections. It does not generate application code or change file-access permissions.
+- Configuration adjusts labels, categories, screen routes, and connections. It does not generate application code or change file-access permissions.
 - The initial graph has one node per scanned file. Configuration does not create virtual nodes or combine several files into one feature node.
 - Declared relationships remain `inferred`. Resolved source imports are separate evidence; a declared `imports` connection does not become confirmed code evidence.
 - Unknown keys are ignored. Invalid JSON causes all overrides to be ignored with a warning. Use ordinary JSON without comments or trailing commas.

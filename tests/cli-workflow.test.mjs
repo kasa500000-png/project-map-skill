@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const skillRoot = process.env.PROJECT_MAP_SKILL || fileURLToPath(new URL('../skills/project-map', import.meta.url));
+const { scanProject, createTask } = await import(pathToFileURL(path.join(skillRoot, 'scripts/lib/core.mjs')));
+const cli = path.join(skillRoot, 'scripts/project-map.mjs');
+
+test('CLI passes a plan file through explicit review, execution, and linked outcome checks', async t => {
+  const arena = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'project-map-cli-')));
+  const root = path.join(arena, 'app with spaces');
+  await fs.mkdir(path.join(root, 'app'), { recursive: true });
+  await fs.writeFile(path.join(root, 'app/page.tsx'), 'export default function Home(){return null;}\n');
+  t.after(() => fs.rm(arena, { recursive: true, force: true }));
+  const map = await scanProject(root);
+  const task = await createTask(root, { nodeIds: ['app/page.tsx'], intent: 'display', request: '제목을 표시해줘.', snapshotId: map.snapshotId });
+  const run = (...args) => JSON.parse(execFileSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8' }));
+  const proposalFile = path.join(root, '.project-map', 'draft plan.json');
+  await fs.writeFile(proposalFile, JSON.stringify({ summary: '홈 제목 표시', writeFiles: ['app/page.tsx'], effects: [{ nodeId: 'app/page.tsx', change: '제목 추가', expected: '홈 제목을 볼 수 있음', verify: '실행 화면 확인' }] }));
+  const planned = run('plan', '--id', task.id, '--file', proposalFile);
+  assert.equal(planned.status, 'awaiting_review');
+  const rejected = spawnSync(process.execPath, [cli, 'start', '--id', task.id, '--project', root], { encoding: 'utf8' });
+  assert.notEqual(rejected.status, 0);
+  const approved = run('review', '--id', task.id, '--decision', 'approve', '--revision', String(planned.plan.revision), '--snapshot', planned.plan.snapshotId);
+  assert.equal(approved.approval.source, 'conversation');
+  assert.ok(run('wait', '--timeout', '0').tasks.some(item => item.id === task.id));
+  assert.equal(run('start', '--id', task.id).status, 'running');
+  await fs.appendFile(path.join(root, 'app/page.tsx'), '// requested change\n');
+  const checksFile = path.join(root, '.project-map', 'checks.json');
+  await fs.writeFile(checksFile, JSON.stringify([{ name: '기대 결과 확인', nodeId: 'app/page.tsx', status: 'not_run', detail: '실행 화면 확인 필요' }]));
+  const done = run('complete', '--id', task.id, '--summary', '홈 변경 기록', '--checks-file', checksFile);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.result.changes.length, 1);
+  assert.equal(done.result.outcomes[0].status, 'not_run');
+  assert.equal(done.baseline, undefined);
+  assert.equal(done.baselineEdges, undefined);
+});

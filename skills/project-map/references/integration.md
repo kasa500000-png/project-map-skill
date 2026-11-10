@@ -12,15 +12,17 @@ Run `node scripts/project-map.mjs --help` from the skill directory for the exact
 | impact --node PATH --intent behavior --request TEXT | Preview scope |
 | tasks --status queued | Find saved requests |
 | task --id ID | Read scoped task context |
-| start --id ID | Check freshness and mark running |
-| complete --id ID --summary TEXT --checks JSON | Record changes and checks |
-| wait --timeout 50 | Wait during an active agent session |
+| plan --id ID --file PATH | Publish the agent's plan and expected graph for user review |
+| review --id ID --decision approve --revision NUMBER --snapshot ID | Record an explicit user decision from the current conversation |
+| start --id ID | Check current approval and freshness, then mark running |
+| complete --id ID --summary TEXT --checks-file PATH | Record changes and feature-linked checks |
+| wait --timeout 50 | Wait for queued or approved work during an active agent session |
 
 Node IDs are relative source paths. Quote paths containing spaces. Construct arguments safely rather than concatenating untrusted shell text.
 
 ## Handoff
 
-The local UI saves requests and cannot edit source or run shell commands. An active agent reads the selected task. Saving cannot launch an idle Codex process.
+The local UI saves requests and plan-review decisions. It cannot edit source or run shell commands. An active agent reads the selected task, writes a plan using [plan-format.md](plan-format.md), then implements the reviewed plan. Saving or approving cannot launch an idle Codex process. `wait --status approved` can wait specifically for reviewed work.
 
 Supported desktop hosts expose `document.oai.annotation.request`. The UI can open an annotation carrying the task ID; the user submits it. `accepted` is only an acknowledgment. Other browsers use a copy-and-paste handoff.
 
@@ -34,9 +36,10 @@ GET `/api/session` returns a process-local token. POST requests require JSON and
 - POST `/api/refresh`: refresh source index
 - POST `/api/impact`: `{nodeIds,intent,request}`
 - GET `/api/tasks`: requests without large baselines
-- POST `/api/tasks`: `{nodeIds,intent,request,snapshotId}`
+- POST `/api/tasks`: `{nodeIds,intent,request,snapshotId,parentTaskId?}`
 - GET `/api/tasks/ID`: request and recorded result
-- GET `/api/changes?task=ID`: actual change result
+- POST `/api/tasks/ID/review`: `{decision:"approve"|"revise",revision,snapshotId,note?}`
+- GET `/api/changes?task=ID`: plan, review and actual change result
 
 No shell-execution, arbitrary-file-read, push or deployment endpoint exists. Normal agent tools perform code edits under existing permissions.
 

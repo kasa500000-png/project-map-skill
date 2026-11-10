@@ -10,8 +10,10 @@ const required = [
   'skills/project-map/SKILL.md', 'skills/project-map/agents/openai.yaml',
   'skills/project-map/scripts/project-map.mjs',
   'skills/project-map/scripts/lib/core.mjs', 'skills/project-map/scripts/lib/server.mjs',
+  'skills/project-map/scripts/lib/flow.mjs',
   'skills/project-map/assets/index.html', 'skills/project-map/assets/app.js',
   'skills/project-map/assets/styles.css', 'skills/project-map/references/config.md',
+  'skills/project-map/references/plan-format.md',
   'examples/sample-app/package.json'
 ];
 for (const file of required) {

@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir, unlink, realpath, rename, lstat } from 'nod
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { scanProject, getMap, analyzeImpact, createTask, listTasks, getTask, getStateDir } from './core.mjs';
+import { scanProject, getMap, analyzeImpact, createTask, listTasks, getTask, reviewTask, getStateDir } from './core.mjs';
 
 const assets = fileURLToPath(new URL('../../assets/', import.meta.url));
 const routes = new Map([
@@ -91,7 +91,7 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
         }
         if (url.pathname === '/api/changes') {
           const task = await getTask(root, url.searchParams.get('task') || '', options);
-          return reply(res, 200, { taskId: task.id, status: task.status, result: task.result || null });
+          return reply(res, 200, { taskId: task.id, status: task.status, plan: task.plan || null, approval: task.approval || null, result: task.result || null });
         }
         return reply(res, 404, { error: 'NOT_FOUND', message: 'Not found.' });
       }
@@ -102,6 +102,8 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
         if (url.pathname === '/api/refresh') return { value: await scanProject(root, options), status: 200 };
         if (url.pathname === '/api/impact') return { value: analyzeImpact(await getMap(root, options), input), status: 200 };
         if (url.pathname === '/api/tasks') return { value: summarizeTask(await createTask(root, input, options)), status: 201 };
+        const review = url.pathname.match(/^\/api\/tasks\/([^/]+)\/review$/);
+        if (review) return { value: summarizeTask(await reviewTask(root, decodeURIComponent(review[1]), { ...input, source: 'dashboard' }, options)), status: 200 };
         throw error('Not found.', 404, 'NOT_FOUND');
       };
       const operation = mutation.then(run, run);
@@ -142,6 +144,6 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
 }
 
 export function summarizeTask(task) {
-  const { baseline, baselineNodes, ...summary } = task;
+  const { baseline, baselineNodes, baselineEdges, ...summary } = task;
   return summary;
 }

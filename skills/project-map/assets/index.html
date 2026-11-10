@@ -25,6 +25,7 @@
     <details id="coverage" class="coverage" hidden><summary id="coverage-label"></summary><ul id="coverage-list"></ul></details>
     <nav class="tabs" aria-label="Workspace views">
       <button class="tab is-active" id="tab-structure" type="button" aria-current="page" data-view="structure" data-i18n="structure">프로젝트 구조</button>
+      <button class="tab" id="tab-review" type="button" data-view="review"><span data-i18n="review">계획 검토</span><span id="review-count" class="count">0</span></button>
       <button class="tab" id="tab-changes" type="button" data-view="changes" data-i18n="changes">변경 내역</button>
       <button class="tab" id="tab-tasks" type="button" data-view="tasks"><span data-i18n="tasks">작업 요청</span><span id="task-count" class="count">0</span></button>
     </nav>
@@ -36,17 +37,20 @@
             <div class="map-toolbar-title"><h2 id="map-title" data-i18n="mapTitle">어디를 바꿀까요?</h2><p class="muted small" data-i18n="mapHint">기능을 선택하면 연결된 코드를 함께 볼 수 있습니다.</p></div>
             <div class="map-controls"><div class="segmented" aria-label="Map scope"><button type="button" id="scope-features" aria-pressed="true" data-scope="features" data-i18n="features">기능 중심</button><button type="button" id="scope-all" aria-pressed="false" data-scope="all" data-i18n="allFiles">전체 파일</button></div><label class="search-wrap"><span class="sr-only" data-i18n="search">기능·파일 검색</span><input id="search" type="search" placeholder="기능·파일 검색" autocomplete="off"></label></div>
           </div>
+          <div class="connection-toolbar"><div class="segmented" aria-label="Relationship view"><button type="button" data-connections="flow" aria-pressed="true" data-i18n="screenFlow">화면 이동</button><button type="button" data-connections="implementation" aria-pressed="false" data-i18n="implementation">구현 연결</button></div><span class="small muted" id="connection-count"></span></div>
           <div class="selection-toolbar"><label class="check-label"><input id="multi-select" type="checkbox"><span data-i18n="multiSelect">여러 항목 선택</span></label><button class="text-button" id="clear-selection" type="button" data-i18n="clearSelection">선택 해제</button><span id="visible-count" class="small muted"></span></div>
           <div class="map-stage" id="map-stage" oai-annotation-container>
             <svg id="connections" class="connections" aria-hidden="true"></svg>
             <div id="map-columns" class="map-columns"></div>
             <p id="map-empty" class="empty" hidden></p>
           </div>
-          <div class="map-footer"><div class="legend"><span><i class="legend-edit"></i><span data-i18n="write">수정 후보</span></span><span><i class="legend-read"></i><span data-i18n="read">참고</span></span><span><i class="legend-verify"></i><span data-i18n="verify">함께 검증</span></span></div><p class="small muted" id="map-caption"></p></div>
+          <div class="map-footer"><div class="legend"><span><i class="legend-arrow flow-arrow"></i><span data-i18n="navigates">화면 이동</span></span><span><i class="legend-arrow code-arrow"></i><span data-i18n="codeRelation">코드 참조</span></span><span><i class="legend-edit"></i><span data-i18n="write">수정 후보</span></span><span><i class="legend-read"></i><span data-i18n="read">참고</span></span><span><i class="legend-verify"></i><span data-i18n="verify">함께 검증</span></span></div><p class="small muted" id="map-caption"></p></div>
         </section>
 
         <aside class="request-panel" aria-labelledby="request-title">
           <div class="eyebrow" data-i18n="selectedTarget">선택한 작업 대상</div><h2 id="request-title" data-i18n="selectFirst">기능을 선택하세요</h2><div id="selection-summary" class="selection-summary"></div>
+          <div id="followup-context" class="followup-context" hidden><p id="followup-label" class="small"></p><button id="clear-followup" class="text-button" type="button" data-i18n="clearFollowup">독립된 새 요청으로 변경</button></div>
+          <details id="relations" class="compact-details relations" hidden><summary id="relations-title"></summary><div id="relations-list"></div></details>
           <form id="request-form">
             <label for="intent" data-i18n="intentLabel">변경 종류</label>
             <select id="intent"><option value="display" data-i18n="displayIntent">화면 표시·문구 변경</option><option value="behavior" data-i18n="behaviorIntent">기능의 동작 변경</option><option value="contract" data-i18n="contractIntent">공용 규칙·데이터 형식 변경</option></select>
@@ -63,16 +67,35 @@
             <button id="save-task" class="button button-primary button-block" type="button" data-i18n="saveTask">이 범위로 작업 요청 저장</button>
             <p class="small muted" data-i18n="saveNote">요청 저장 후 Codex에서 실행합니다.</p>
           </section>
-          <section id="saved-panel" class="saved-panel" aria-live="polite" hidden><div class="eyebrow" data-i18n="savedTitle">작업 요청 저장됨</div><p id="saved-id" class="mono"></p><p id="saved-status" class="small muted" data-i18n="savedNote">대기 중인 요청입니다. 아직 코드 수정은 시작되지 않았습니다.</p><button id="annotate" type="button" class="button button-primary button-block" hidden data-i18n="annotate">Codex에 선택 항목 첨부</button><button id="copy-prompt" type="button" class="button button-block" data-i18n="copyPrompt">Codex 요청문 복사</button><details class="compact-details"><summary data-i18n="viewPrompt">전달할 요청문 보기</summary><pre id="saved-prompt" class="prompt"></pre></details></section>
+          <section id="saved-panel" class="saved-panel" aria-live="polite" hidden><div class="eyebrow" data-i18n="savedTitle">작업 요청 저장됨</div><p id="saved-id" class="mono"></p><p id="saved-status" class="small muted" data-i18n="savedNote">대기 중인 요청입니다. 아직 코드 수정은 시작되지 않았습니다.</p><button id="annotate" type="button" class="button button-primary button-block" hidden data-i18n="annotate">Codex에 선택 항목 첨부</button><button id="copy-prompt" type="button" class="button button-block" data-i18n="copyPrompt">Codex 요청문 복사</button><button id="open-review" type="button" class="text-button" data-i18n="openReview">계획 검토로 이동</button><details class="compact-details"><summary data-i18n="viewPrompt">전달할 요청문 보기</summary><pre id="saved-prompt" class="prompt"></pre></details></section>
           <div id="idle-guidance" class="idle-guidance"><span class="guidance-line" aria-hidden="true"></span><p data-i18n="idleGuidance">화면·기능을 고르고 변경할 내용을 적어주세요. 수정 후보와 함께 확인할 부분을 나눠 보여드립니다.</p></div>
         </aside>
+      </div>
+    </section>
+
+    <section id="view-review" class="review-view" aria-labelledby="tab-review" hidden>
+      <div class="section-bar"><div><div class="eyebrow" data-i18n="reviewEyebrow">작업 전에 함께 확인</div><h2 data-i18n="reviewTitle">어떻게 바뀌는지 보고 결정하세요</h2><p class="muted small" data-i18n="reviewHint">Codex가 제안한 계획입니다. 승인한 뒤 코드 작업을 시작합니다.</p></div><label class="task-picker"><span class="sr-only" data-i18n="chooseTask">작업 선택</span><select id="review-task"></select></label></div>
+      <div id="review-empty" class="empty-panel"><h3 data-i18n="noReviewTitle">지도에서 작업 요청을 먼저 저장하세요</h3><p class="muted" data-i18n="noReview">Codex가 계획을 작성하면 변경 전과 예상 모습을 여기서 비교할 수 있습니다.</p></div>
+      <div id="review-content" hidden>
+        <div id="review-overview" class="review-overview"></div>
+        <ol class="workflow" id="review-workflow" aria-label="Task progress"></ol>
+        <div id="review-waiting" class="waiting-panel" hidden><h3 id="review-waiting-title"></h3><p id="review-waiting-note"></p></div>
+        <section id="plan-content" hidden>
+          <div class="plan-heading"><div><h3 id="plan-summary"></h3><p id="plan-version" class="small muted"></p></div><span class="expectation-tag" data-i18n="expectedOnly">예상 변경 · 아직 실제 결과가 아닙니다</span></div>
+          <div class="graph-comparison"><section class="graph-frame"><div class="graph-heading"><h3 data-i18n="beforeGraph">변경 전</h3><span class="small muted" data-i18n="baselineGraph">계획 기준 지도</span></div><div id="plan-before-graph" class="diagram-viewport"></div></section><section class="graph-frame expected-frame"><div class="graph-heading"><h3 data-i18n="expectedGraph">이렇게 바꿀 예정</h3><span class="small muted" data-i18n="expectedLabel">Codex 제안</span></div><div id="plan-after-graph" class="diagram-viewport"></div></section></div>
+          <div class="comparison-legend legend"><span><i class="legend-arrow flow-arrow"></i><span data-i18n="navigates">화면 이동</span></span><span><i class="legend-arrow code-arrow"></i><span data-i18n="codeRelation">코드 참조</span></span><span><i class="legend-added"></i><span data-i18n="plannedAdd">추가 예정</span></span><span><i class="legend-deleted"></i><span data-i18n="plannedRemove">제거 예정</span></span></div>
+          <div id="plan-effects" class="effect-list"></div>
+          <details class="plan-files compact-details"><summary id="plan-files-summary"></summary><ul id="plan-files" class="scope-files"></ul></details>
+          <div id="review-actions" class="review-actions" hidden><label for="review-note" data-i18n="reviewNote">계획에 대한 의견 (수정 요청 시 필수)</label><textarea id="review-note" rows="3" maxlength="4000" placeholder="예: 목록 화면은 그대로 두고, 상세 화면의 요약만 바꿔줘."></textarea><div class="review-buttons"><button id="approve-plan" class="button button-primary" type="button" data-i18n="approvePlan">이 계획으로 작업 진행</button><button id="revise-plan" class="button" type="button" data-i18n="revisePlan">계획 수정 요청</button></div><p class="small muted" data-i18n="approveNote">현재 표시된 계획 버전을 승인합니다. Codex의 활성 작업이 이어서 진행하거나, 아래 요청문으로 계속할 수 있습니다.</p></div>
+        </section>
+        <section class="handoff-panel"><p id="review-handoff" class="small muted"></p><div class="review-buttons"><button id="review-copy" class="button" type="button" data-i18n="copyPrompt">Codex 요청문 복사</button><button id="review-refresh" class="button button-quiet" type="button" data-i18n="reloadTasks">상태 새로고침</button><button id="review-result" class="button" type="button" hidden data-i18n="viewChanges">변경 내역 보기</button></div><details class="compact-details"><summary data-i18n="viewPrompt">전달할 요청문 보기</summary><pre id="review-prompt" class="prompt"></pre></details></section>
       </div>
     </section>
 
     <section id="view-changes" class="changes-view" aria-labelledby="tab-changes" hidden>
       <div class="section-bar"><div><h2 data-i18n="changesTitle">계획과 실제 변경을 비교합니다</h2><p class="muted small" data-i18n="changesHint">작업 시작 시점의 파일 상태와 완료 시점의 상태를 비교한 결과입니다.</p></div><label class="task-picker"><span class="sr-only" data-i18n="chooseTask">작업 선택</span><select id="change-task"></select></label></div>
       <div id="change-empty" class="empty-panel"><h3 data-i18n="noChangesTitle">아직 완료된 변경 기록이 없습니다</h3><p class="muted" data-i18n="noChanges">Codex가 저장한 작업을 실행하고 완료 기록을 남기면 여기에서 확인할 수 있습니다.</p></div>
-      <div id="change-content" hidden><div id="change-summary" class="change-summary"></div><section id="change-coverage" class="comparison-coverage" hidden><h3 data-i18n="comparisonTitle">변경 비교 범위</h3><p id="comparison-status"></p><p id="comparison-counts" class="small muted"></p><details id="change-warnings" class="compact-details" hidden><summary data-i18n="comparisonWarnings">비교 결과를 읽는 기준</summary><ul></ul></details></section><div id="change-alert" class="notice" hidden></div><div id="change-board" class="change-board"></div><section class="checks-panel"><h3 data-i18n="checksTitle">확인 결과</h3><div id="checks"></div></section></div>
+      <div id="change-content" hidden><div id="change-summary" class="change-summary"></div><section id="actual-graphs" hidden><div class="graph-comparison"><section class="graph-frame"><div class="graph-heading"><h3 data-i18n="actualBeforeGraph">작업 전</h3><span class="small muted" data-i18n="observedGraph">분석한 코드 구조</span></div><div id="result-before-graph" class="diagram-viewport"></div></section><section class="graph-frame"><div class="graph-heading"><h3 data-i18n="actualAfterGraph">작업 후</h3><span class="small muted" data-i18n="actualNotBehavior">코드 변경 · 동작 확인은 아래 결과 참고</span></div><div id="result-after-graph" class="diagram-viewport"></div></section></div></section><section id="outcomes-panel" class="outcomes-panel" hidden><h3 data-i18n="outcomesTitle">기능별 기대와 확인 결과</h3><p class="muted small" data-i18n="outcomesHint">파일이 바뀌어도 기능 검증이 기록되지 않았다면 미확인으로 남습니다.</p><div id="outcomes" class="effect-list"></div></section><section id="change-coverage" class="comparison-coverage" hidden><h3 data-i18n="comparisonTitle">변경 비교 범위</h3><p id="comparison-status"></p><p id="comparison-counts" class="small muted"></p><details id="change-warnings" class="compact-details" hidden><summary data-i18n="comparisonWarnings">비교 결과를 읽는 기준</summary><ul></ul></details></section><div id="change-alert" class="notice" hidden></div><details class="compact-details"><summary data-i18n="changedFilesDetail">실제 변경 파일 상세</summary><div id="change-board" class="change-board"></div></details><section class="checks-panel"><h3 data-i18n="checksTitle">확인 결과</h3><div id="checks"></div></section><div class="continue-panel"><div><h3 data-i18n="continueTitle">이 결과에서 다음 작업을 이어가세요</h3><p class="muted small" data-i18n="continueHint">현재 지도에 남아 있는 관련 기능을 다시 선택하고 이전 작업과 연결합니다.</p></div><button id="continue-task" class="button button-primary" type="button" data-i18n="continueTask">관련 기능으로 다음 요청</button></div></div>
     </section>
 
     <section id="view-tasks" class="tasks-view" aria-labelledby="tab-tasks" hidden>
@@ -80,7 +103,7 @@
       <div id="tasks-empty" class="empty-panel"><h3 data-i18n="noTasksTitle">첫 작업을 지도에서 선택해 보세요</h3><p class="muted" data-i18n="noTasks">기능을 선택하고 요청을 저장하면 이곳에 작업이 쌓입니다.</p></div>
       <div class="task-layout"><div id="task-list" class="task-list"></div><aside id="task-detail" class="task-detail" hidden></aside></div>
     </section>
-    <footer class="app-footer"><span>Project Map <span id="version">v0.1</span></span><span data-i18n="footer">자동 분석은 확인 가능한 코드 관계를 바탕으로 합니다. 실제 수정 전 최신 코드를 확인하세요.</span></footer>
+    <footer class="app-footer"><span>Project Map <span id="version">v0.2</span></span><span data-i18n="footer">자동 분석은 확인 가능한 코드 관계를 바탕으로 합니다. 실제 수정 전 최신 코드를 확인하세요.</span></footer>
   </main>
 </body>
 </html>

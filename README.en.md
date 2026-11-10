@@ -4,7 +4,7 @@
 
 [한국어](README.md) · [Skill instructions](skills/project-map/SKILL.md) · [Fictional example](examples/sample-app)
 
-Project Map scans local source files and shows screens, shared modules, and their connections. Select nodes, describe a change, and inspect three scopes: **write candidates, reading context, and verification targets**. After the work, inspect added, modified, deleted, and out-of-scope source files.
+Project Map shows screen navigation separately from implementation dependencies. Select a feature and describe your desired result. Codex reads relevant source, publishes a visual before/expected plan, and waits for the user's review. After implementation, compare actual flow and source changes with expected feature outcomes, then continue with a linked follow-up request.
 
 The runtime uses only Node.js built-ins. It does not require a database, API key, or npm package installation.
 
@@ -42,17 +42,21 @@ If symbolic links are unavailable, use `--copy`. Copied installations must be up
 2. Select a screen or shared module.
 3. Describe your change and choose display, behavior, or data-contract intent.
 4. Inspect the suggested scope and save the request.
-5. Ask Codex to process its request ID:
+5. Ask Codex to prepare a visual plan for its request ID:
 
 ```text
-$project-map Read and carry out saved request <request ID>.
+$project-map Read saved request <request ID>, inspect related code, and show the expected change map before editing.
 ```
 
 The dashboard saves a real local request. A save action in an ordinary browser does **not** start a Codex session. A compatible desktop built-in browser can also attach the selected element and request metadata to the Codex conversation; feature detection keeps the copyable prompt available on other browsers.
 
 An active agent may wait for the selected request. Saving cannot wake an ended session, so submit the copyable prompt to resume the workflow.
 
-The agent checks current source, uses the saved scope as a starting point, performs the requested work, and records the comparison and actual verification results. Completion does not imply tests passed.
+6. In **Plan review**, inspect the current and expected maps, each feature's change and expected result, and how it will be checked. Approve the exact plan or request a revision with feedback.
+7. Codex executes the reviewed plan. A changed plan needs a fresh review, and source changes invalidate stale approval.
+8. Compare baseline and actual flow maps, changed files, and per-feature verification. Use **Continue from this result** to create a linked request against a fresh baseline.
+
+Saving or approving a request cannot launch an ended agent session. Use the provided continuation prompt when needed. An unchanged connection can be correct for a wording-only edit: read the node's expected effect. Changed files or a successful build do not automatically prove that the expected feature behavior works; unverified outcomes remain unverified.
 
 ## Try a small example
 
@@ -88,9 +92,9 @@ node scripts/install.mjs --uninstall
 
 Removal only removes a link owned by this clone or an unchanged managed copy. It refuses to discard local edits. Project maps and task records remain untouched.
 
-## What v0.1 does and does not establish
+## What v0.2 does and does not establish
 
-- Static JavaScript/TypeScript imports, simple path aliases, and React/Next.js/Expo-style source conventions are the primary analysis targets. This is heuristic source analysis, not a complete compiler or runtime dependency graph.
+- Static JavaScript/TypeScript imports, simple path aliases, React/Next.js/Expo-style source conventions, and recognized literal navigation targets are the primary analysis targets. This is heuristic source analysis, not a complete compiler or runtime dependency graph.
 - Dynamic imports, event names, runtime routing, database rules, and external services can introduce connections the map does not discover.
 - Parallel work suggestions are conditional. A missing edge does not prove two tasks are independent.
 - There is no automatic multi-session launch, worktree orchestration, merge, or deployment in this version.
@@ -117,7 +121,11 @@ Run the dependency-free test suite:
 
 ```bash
 npm test
+npm run check
 ```
+
+See the [validation record](docs/validation.md) for tested behavior and browser
+verification limits.
 
 Report bugs with a small reproducible fixture rather than private code or credentials. Add tests for route detection, dependency resolution, impact scope, and warnings when extending framework support.
 

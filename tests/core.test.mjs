@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const skillRoot = process.env.PROJECT_MAP_SKILL || fileURLToPath(new URL('../skills/project-map', import.meta.url));
-const { scanProject, getMap, analyzeImpact, createTask, getTask, listTasks, updateTask, completeTask } = await import(pathToFileURL(path.join(skillRoot, 'scripts/lib/core.mjs')));
+const { scanProject, getMap, analyzeImpact, createTask, getTask, listTasks, proposeTask, reviewTask, updateTask, completeTask } = await import(pathToFileURL(path.join(skillRoot, 'scripts/lib/core.mjs')));
 const cli = path.join(skillRoot, 'scripts/project-map.mjs');
 
 async function write(root, relative, content) {
@@ -43,6 +43,15 @@ async function fixture(t, { useGit = false } = {}) {
 async function queued(root, nodeIds = ['src/app/tasks/page.tsx']) {
   const map = await scanProject(root);
   return createTask(root, { nodeIds, intent: 'display', request: '선택한 화면의 표시를 정리해줘.', snapshotId: map.snapshotId });
+}
+
+async function approve(root, task) {
+  const proposed = await proposeTask(root, task.id, {
+    summary: '선택한 화면의 표시를 정리하고 결과를 확인합니다.',
+    writeFiles: task.nodeIds,
+    effects: task.nodeIds.map(nodeId => ({ nodeId, change: '화면 표시 정리', expected: '변경한 표시가 화면에 보입니다.', verify: '실제 화면을 열어 변경된 표시를 확인합니다.' })),
+  });
+  return reviewTask(root, task.id, { decision: 'approve', revision: proposed.plan.revision, snapshotId: proposed.plan.snapshotId, source: 'conversation' });
 }
 
 test('maps actual files, resolves imports and aliases, and keeps feature labels inferred', async t => {
@@ -149,9 +158,10 @@ test('stale snapshots are rejected both when queueing and before first execution
   await assert.rejects(() => createTask(root, { nodeIds: ['src/app/tasks/page.tsx'], request: '정리해줘', snapshotId: map.snapshotId }), error => error.code === 'STALE_SNAPSHOT');
   assert.equal((await listTasks(root)).length, 0);
   const task = await queued(root);
+  await approve(root, task);
   await fs.appendFile(path.join(root, 'src/components/TaskCard.tsx'), '// changed before start\n');
   await assert.rejects(() => updateTask(root, task.id, { status: 'running' }), error => error.code === 'STALE_SNAPSHOT');
-  assert.equal((await getTask(root, task.id)).status, 'queued');
+  assert.equal((await getTask(root, task.id)).status, 'approved');
 });
 
 test('completion uses the request baseline and reports additions, deletions, and scope escapes', async t => {
@@ -161,6 +171,7 @@ test('completion uses the request baseline and reports additions, deletions, and
   await fs.appendFile(path.join(root, 'src/data/tasks.ts'), '// pre-existing dirty change\n');
   const task = await queued(root);
   assert.ok((await getMap(root)).project.git.dirty);
+  await approve(root, task);
   const running = await updateTask(root, task.id, { status: 'running' });
   assert.ok(running.startedAt);
   await fs.appendFile(path.join(root, 'src/app/tasks/page.tsx'), '// requested change\n');
@@ -196,6 +207,7 @@ test('verification reflects recorded outcomes and cannot be forged through a sta
     const task = await queued(root);
     await assert.rejects(() => updateTask(root, task.id, { status: 'completed' }), error => error.code === 'INVALID_INPUT');
     await assert.rejects(() => updateTask(root, task.id, { projectRoot: '/elsewhere' }), error => error.code === 'INVALID_INPUT');
+    await approve(root, task);
     await updateTask(root, task.id, { status: 'running' });
     const done = await completeTask(root, task.id, { checks });
     assert.equal(done.verificationStatus, expected);
@@ -260,6 +272,8 @@ test('oversized and binary sources produce an explicit incomplete-comparison war
   await write(root, 'src/binary.ts', Buffer.from([0, 1, 2, 3]));
   const task = await queued(root);
   assert.equal(task.baselineCoverage.skippedFiles, 2);
+  await approve(root, task);
+  await updateTask(root, task.id, { status: 'running' });
   const done = await completeTask(root, task.id, {});
   assert.equal(done.result.comparisonCoverage.completeWithinScannedSources, false);
   assert.ok(done.result.warnings.some(message => /incomplete/.test(message)));
@@ -280,6 +294,7 @@ test('CLI entry point works through an installed skill link and project paths co
   assert.equal(summary.id, task.id);
   assert.equal(summary.baseline, undefined);
   assert.equal(summary.baselineNodes, undefined);
+  await approve(root, task);
   assert.equal(run(['start', '--id', task.id]).status, 'running');
   assert.equal(run(['complete', '--id', task.id, '--summary', '완료']).verificationStatus, 'not_run');
   assert.ok(cli.endsWith('project-map.mjs'));

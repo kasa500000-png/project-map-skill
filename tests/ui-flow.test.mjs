@@ -110,6 +110,8 @@ class Element {
     return null;
   }
 
+  focus() { this.focused = true; }
+
   getBoundingClientRect() {
     // Fixed placeholder geometry permits drawing code to execute, but does not
     // measure real positions, overlapping labels, responsive layout, or paint.
@@ -177,7 +179,7 @@ async function createFixture(root) {
   const files = {
     'package.json': JSON.stringify({ name: 'project-map-ui-fixture', private: true }),
     'tsconfig.json': JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
-    'src/app/page.tsx': "import { TaskList } from '@/components/TaskList';\nexport default function Home() { return <TaskList />; }\n",
+    'src/app/page.tsx': "import Link from 'next/link';\nimport { TaskList } from '@/components/TaskList';\nexport default function Home() { return <main><Link href=\"/tasks\">Tasks</Link><TaskList /></main>; }\n",
     'src/app/tasks/page.tsx': "import { TaskList } from '@/components/TaskList';\nexport default function Tasks() { return <main><h1>Tasks</h1><TaskList /></main>; }\n",
     'src/components/TaskList.tsx': "import { tasks } from '@/lib/tasks';\nexport function TaskList() { return <ul>{tasks.map(task => <li key={task.id}>{task.title}</li>)}</ul>; }\n",
     'src/lib/tasks.ts': "export const tasks = [{ id: 'sample', title: 'Example task' }];\n",
@@ -191,7 +193,7 @@ async function createFixture(root) {
 
 test('UI request flow against the real API with a mock DOM (no browser layout)', async t => {
   const { startServer } = await import(pathToFileURL(path.join(skillRoot, 'scripts', 'lib', 'server.mjs')).href);
-  const { completeTask } = await import(pathToFileURL(path.join(skillRoot, 'scripts', 'lib', 'core.mjs')).href);
+  const { completeTask, proposeTask, getTask, updateTask } = await import(pathToFileURL(path.join(skillRoot, 'scripts', 'lib', 'core.mjs')).href);
   const temporaryRoot = await mkdtemp(path.join(await realpath(tmpdir()), 'project-map-ui-'));
   const projectRoot = path.join(temporaryRoot, 'fixture');
   const stateDir = path.join(temporaryRoot, 'state');
@@ -221,12 +223,16 @@ test('UI request flow against the real API with a mock DOM (no browser layout)',
   };
   let clipboard = '';
   const storage = {};
+  const requests = [];
   const context = {
     document,
     window: { addEventListener() {} },
     navigator: { clipboard: { writeText: async value => { clipboard = value; } } },
     localStorage: { getItem: key => storage[key], setItem: (key, value) => { storage[key] = value; } },
-    fetch: (url, options) => fetch(new URL(url, server.url), options),
+    fetch: (url, options) => {
+      requests.push({ url, method: options?.method || 'GET', body: options?.body ? JSON.parse(options.body) : null });
+      return fetch(new URL(url, server.url), options);
+    },
     setInterval: () => 1, // Explicit actions exercise polling updates without background timers.
     requestAnimationFrame: callback => {
       const timer = setTimeout(() => { frames.delete(timer); callback(); }, 0);
@@ -249,10 +255,22 @@ test('UI request flow against the real API with a mock DOM (no browser layout)',
   vm.runInNewContext(await readFile(path.join(skillRoot, 'assets', 'app.js'), 'utf8'), context, { filename: 'app.js' });
   await until(() => document.querySelectorAll('.map-node').length > 0);
   assert.equal(query('#error').hidden, true);
-  const target = document.querySelectorAll('.map-node').find(node => node.dataset.nodeId === 'src/app/tasks/page.tsx');
+  // Edges represent source evidence and remain visible when nothing is selected.
+  await query('#clear-selection').fire('click');
+  assert.ok(document.querySelectorAll('.graph-edge').some(node => node.attrs['data-edge-kind'] === 'navigates'));
+  assert.ok(document.querySelectorAll('.graph-edge').every(node => node.attrs['marker-end']));
+  await query('[data-connections="implementation"]').fire('click');
+  assert.ok(document.querySelectorAll('.graph-edge').length > 0, 'Implementation edges appear before selection');
+  assert.ok(document.querySelectorAll('.graph-edge').every(node => node.attrs['data-edge-kind'] !== 'navigates'));
+  await query('[data-connections="flow"]').fire('click');
+
+  const targetId = 'src/app/tasks/page.tsx';
+  const addedId = 'src/app/tasks/review/page.tsx';
+  const target = document.querySelectorAll('.map-node').find(node => node.dataset.nodeId === targetId);
   assert.ok(target, 'The route node should be selectable');
   await target.fire('click');
-  query('#request').value = 'UI integration: 입력 순서를 간결하게 정리해줘.';
+  assert.match(query('#relations-list').textContent, /화면 이동/);
+  query('#request').value = 'UI integration: 작업 요약 제목을 바꾸고 검토 화면을 연결해줘.';
   await query('#request').fire('input');
   assert.equal(query('#analyze').disabled, false);
   await query('#request-form').fire('submit');
@@ -260,25 +278,90 @@ test('UI request flow against the real API with a mock DOM (no browser layout)',
   assert.match(query('#impact-scopes').textContent, /수정 후보/);
   assert.equal(query('#save-task').disabled, false);
   await query('#save-task').fire('click');
-  assert.equal(query('#saved-panel').hidden, false);
+  assert.equal(query('#view-review').hidden, false);
   const taskId = query('#saved-id').textContent;
   assert.match(taskId, /^task-/);
-  assert.match(query('#saved-status').textContent, /대기/);
-  await query('#copy-prompt').fire('click');
-  await until(() => clipboard.includes(taskId));
-  assert.ok(clipboard.includes('$project-map'));
+  assert.match(query('#review-overview').textContent, /계획 작성 대기/);
+  assert.equal(query('#plan-content').hidden, true);
+  await query('#review-copy').fire('click');
+  assert.ok(clipboard.includes(taskId) && clipboard.includes('$project-map'));
+  assert.match(clipboard, /먼저 변경 계획/);
+  assert.match(clipboard, /승인할 때까지 코드 수정은 시작하지/);
 
-  // Alter only synthetic fixture files to exercise the actual change diagram.
-  await writeFile(path.join(projectRoot, 'src/app/tasks/page.tsx'), "import { TaskList } from '@/components/TaskList';\nexport default function Tasks() { return <main><h1>Task overview</h1><TaskList /></main>; }\n");
+  // The browser never manufactures a semantic plan. Simulate the host agent
+  // publishing a real persisted proposal through the same core used by the CLI.
+  const proposal = {
+    summary: '작업 제목을 간결하게 바꾸고 별도 검토 화면을 연결합니다.',
+    writeFiles: [targetId, addedId],
+    effects: [
+      { nodeId: targetId, change: '제목 문자열과 검토 화면 링크 변경', expected: '소스에 Task overview 제목과 검토 화면 경로가 포함됨', verify: '제목과 링크 문자열을 소스에서 확인' },
+      { nodeId: addedId, change: '검토 화면 추가', expected: '사용자가 목록에서 검토 화면으로 이동할 수 있음', verify: '브라우저에서 이동 경로 확인' },
+    ],
+    newNodes: [{ id: addedId, label: '작업 검토', kind: 'screen', route: '/tasks/review' }],
+    flowChanges: [{ source: targetId, target: addedId, kind: 'navigates', action: 'add', reason: '검토 화면 링크 추가' }],
+  };
+  let proposed = await proposeTask(projectRoot, taskId, proposal, { stateDir });
+  await query('#review-refresh').fire('click');
+  await until(() => !query('#plan-content').hidden);
+  assert.match(query('#review-overview').textContent, /계획 검토 대기/);
+  assert.match(query('#plan-effects').textContent, /브라우저에서 이동 경로 확인/);
+  assert.ok(findAll(query('#plan-before-graph'), '.graph-edge').length > 0);
+  assert.ok(findAll(query('#plan-after-graph'), '.graph-edge').some(node => node.attrs['data-edge-action'] === 'add'));
+  assert.match(query('#plan-after-graph').textContent, /작업 검토/);
+  assert.equal(query('#review-actions').hidden, false);
+
+  query('#review-note').value = '검토 화면에 읽기 쉬운 제목을 추가해줘.';
+  await query('#revise-plan').fire('click');
+  assert.equal((await getTask(projectRoot, taskId, { stateDir })).status, 'queued');
+  assert.equal(query('#plan-content').hidden, true, 'A superseded plan cannot be approved');
+  await query('#review-copy').fire('click');
+  assert.match(clipboard, /검토 화면에 읽기 쉬운 제목/);
+  proposed = await proposeTask(projectRoot, taskId, { ...proposal, summary: '검토 화면의 제목까지 포함한 수정 계획' }, { stateDir });
+  await query('#review-refresh').fire('click');
+  await until(() => query('#plan-version').textContent.includes('계획 버전 2'));
+  await query('#approve-plan').fire('click');
+  const approved = await getTask(projectRoot, taskId, { stateDir });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.approval.revision, proposed.plan.revision);
+  assert.equal(approved.approval.snapshotId, proposed.plan.snapshotId);
+  const approvalRequest = requests.findLast(request => request.url.endsWith('/review') && request.body?.decision === 'approve');
+  assert.deepEqual(approvalRequest.body, { decision: 'approve', revision: proposed.plan.revision, snapshotId: proposed.plan.snapshotId, note: '' });
+  assert.equal(query('#review-actions').hidden, true);
+  await query('#review-copy').fire('click');
+  assert.match(clipboard, /승인된 계획/);
+
+  await updateTask(projectRoot, taskId, { status: 'running' }, { stateDir });
+  await query('#review-refresh').fire('click');
+  await until(() => query('#review-overview').textContent.includes('작업 중'));
+
+  // Alter only synthetic fixture files. One source-level effect is checked;
+  // browser navigation stays unverified despite an unrelated passing check.
+  const updatedSource = "import Link from 'next/link';\nimport { TaskList } from '@/components/TaskList';\nexport default function Tasks() { return <main><h1>Task overview</h1><Link href=\"/tasks/review\">Review</Link><TaskList /></main>; }\n";
+  await writeFile(path.join(projectRoot, targetId), updatedSource);
+  await mkdir(path.dirname(path.join(projectRoot, addedId)), { recursive: true });
+  await writeFile(path.join(projectRoot, addedId), 'export default function Review() { return <h1>Review tasks</h1>; }\n');
   await writeFile(path.join(projectRoot, 'src/new-theme.css'), 'main { padding: 1rem; }\n');
+  assert.match(await readFile(path.join(projectRoot, targetId), 'utf8'), /Task overview/);
+  assert.match(await readFile(path.join(projectRoot, targetId), 'utf8'), /href="\/tasks\/review"/);
   await completeTask(projectRoot, taskId, {
-    summary: 'Updated a synthetic screen and added a synthetic stylesheet.',
-    checks: [{ name: 'Mock DOM interaction', status: 'passed', detail: 'Selected feature, previewed impact, saved request and copied prompt.' }],
+    summary: 'Updated a synthetic screen, added a route, and added a stylesheet.',
+    checks: [
+      { name: 'Source title and route string', nodeId: targetId, status: 'passed', detail: 'Checked fixture source only; no browser behavior claim.' },
+      { name: 'Mock DOM interaction', status: 'passed', detail: 'Selected feature, reviewed a proposal, and approved the exact revision.' },
+    ],
   }, { stateDir });
-  await query('#reload-tasks').fire('click');
-  await until(() => query('#saved-status').textContent.includes('작업 완료'));
-  await query('#tab-changes').fire('click');
+  await query('#review-refresh').fire('click');
+  await until(() => query('#review-overview').textContent.includes('작업 완료'));
+  await query('#review-result').fire('click');
   await until(() => !query('#change-content').hidden);
+  assert.equal(query('#actual-graphs').hidden, false);
+  assert.ok(findAll(query('#result-before-graph'), '.graph-edge').length > 0);
+  assert.ok(findAll(query('#result-after-graph'), '.graph-edge').length > 0);
+  const outcomeCards = findAll(query('#outcomes'), '.effect-card');
+  assert.match(outcomeCards.find(node => node.dataset.nodeId === targetId).textContent, /통과/);
+  const unverified = outcomeCards.find(node => node.dataset.nodeId === addedId);
+  assert.match(unverified.textContent, /미확인/);
+  assert.doesNotMatch(unverified.textContent, /통과/);
   assert.equal(query('#change-coverage').hidden, false);
   assert.match(query('#comparison-status').textContent, /소스 파일/);
   assert.match(query('#comparison-counts').textContent, /분석 파일/);
@@ -286,10 +369,50 @@ test('UI request flow against the real API with a mock DOM (no browser layout)',
   const changes = document.querySelectorAll('.change-card');
   assert.ok(changes.some(node => node.dataset.change === 'modified'));
   assert.ok(changes.some(node => node.dataset.change === 'added'));
-  assert.equal(query('#change-alert').hidden, false, 'The added stylesheet is outside the selected edit scope');
+  assert.equal(query('#change-alert').hidden, false, 'The stylesheet remains outside the approved plan');
+
+  await query('#continue-task').fire('click');
+  assert.equal(query('#view-structure').hidden, false);
+  assert.equal(query('#followup-context').hidden, false);
+  assert.match(query('#followup-label').textContent, new RegExp(taskId));
+  const selectedNodes = document.querySelectorAll('.map-node').filter(node => node.attrs['aria-pressed'] === 'true');
+  assert.ok(selectedNodes.some(node => node.dataset.nodeId === addedId), 'New features are available for follow-up');
+  query('#request').value = '검토 화면의 안내 문구를 짧게 바꿔줘.';
+  await query('#request').fire('input');
+  await query('#request-form').fire('submit');
+  await query('#save-task').fire('click');
+  const followupId = query('#saved-id').textContent;
+  const followup = await getTask(projectRoot, followupId, { stateDir });
+  assert.equal(followup.parentTaskId, taskId);
+  assert.equal(followup.status, 'queued');
   assert.equal(query('#error').hidden, true);
+
+  // Removing a feature must be explicit in the before graph. A newer proposal
+  // invalidates the displayed approval and requires a separate user decision.
+  const removal = {
+    summary: '검토 화면을 제거하는 후속 계획',
+    writeFiles: [addedId],
+    effects: [{ nodeId: addedId, change: '검토 화면 제거', expected: '기존 목록에서 작업을 확인함', verify: '삭제 후 경로와 깨진 링크 확인' }],
+    removeNodeIds: [addedId],
+  };
+  await proposeTask(projectRoot, followupId, removal, { stateDir });
+  await query('#review-refresh').fire('click');
+  await until(() => query('#plan-summary').textContent === removal.summary);
+  const removedCard = findAll(query('#plan-before-graph'), '.comparison-node').find(node => node.dataset.nodeId === addedId);
+  assert.equal(removedCard.dataset.change, 'deleted');
+  assert.match(removedCard.textContent, /제거 예정/);
+  assert.ok(!findAll(query('#plan-after-graph'), '.comparison-node').some(node => node.dataset.nodeId === addedId));
+  await proposeTask(projectRoot, followupId, { ...removal, summary: '최신 삭제 계획' }, { stateDir });
+  await query('#approve-plan').fire('click');
+  assert.equal((await getTask(projectRoot, followupId, { stateDir })).status, 'awaiting_review');
+  assert.equal(query('#error').hidden, false);
+  assert.match(query('#plan-version').textContent, /계획 버전 2/);
+  assert.match(query('#error').textContent, /새로 표시된 계획/);
+  await query('#review-refresh').fire('click');
+  await until(() => query('#error').hidden);
   await query('#language').fire('click');
   assert.equal(document.documentElement.lang, 'en');
-  assert.match(query('#comparison-status').textContent, /indexed source/);
-  t.diagnostic('Real local API: selection, scope preview, request save, prompt copy, completion, actual file changes, coverage, check details, and language. No browser layout engine was used.');
+  await query('#tab-changes').fire('click');
+  await until(() => query('#comparison-status').textContent.includes('indexed source'));
+  t.diagnostic('Real local API + mock DOM: visible source edges, selection, scope, queued plan prompt, proposal/revision/exact approval, completion, observed graphs, per-feature verification, linked follow-up, and language. No browser layout engine was used.');
 });
