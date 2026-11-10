@@ -1,0 +1,15 @@
+{
+  "name": "project-map-skill",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local feature map, scoped request queue, and change review skill for Codex.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check-package.mjs",
+    "demo": "node skills/project-map/scripts/project-map.mjs serve --project examples/sample-app --open",
+    "install:skill": "node scripts/install.mjs"
+  }
+}

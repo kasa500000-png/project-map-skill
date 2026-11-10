@@ -1,0 +1,6 @@
+{
+  "name": "project-map-sample-task-board",
+  "private": true,
+  "description": "A source-only fixture for exploring Project Map. No app dependency installation is required.",
+  "version": "0.0.0"
+}

@@ -1,0 +1,14 @@
+interface:
+  display_name: Project Map
+  short_description: Select app features, plan changes, and inspect code impact
+  default_prompt: Use $project-map to open a visual map of this project, select a
+    feature, and plan a scoped change.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
