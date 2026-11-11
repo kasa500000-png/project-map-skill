@@ -10,11 +10,15 @@ const required = [
   'skills/project-map/SKILL.md', 'skills/project-map/agents/openai.yaml',
   'skills/project-map/scripts/project-map.mjs',
   'skills/project-map/scripts/lib/core.mjs', 'skills/project-map/scripts/lib/server.mjs',
-  'skills/project-map/scripts/lib/flow.mjs',
+  'skills/project-map/scripts/lib/flow.mjs', 'skills/project-map/references/plan-format.md',
   'skills/project-map/assets/index.html', 'skills/project-map/assets/app.js',
   'skills/project-map/assets/styles.css', 'skills/project-map/references/config.md',
-  'skills/project-map/references/plan-format.md',
-  'examples/sample-app/package.json'
+  'skills/project-map/scripts/commands.mjs', 'skills/project-map/scripts/lib/version.mjs',
+  'skills/project-map/scripts/lib/analyzer.mjs',
+  'skills/project-map/scripts/lib/workspace.mjs',
+  'skills/project-map/scripts/lib/feature-map.mjs',
+  'skills/project-map/assets/workbench.html', 'skills/project-map/assets/workbench.js',
+  'skills/project-map/assets/workbench.css', 'examples/sample-app/package.json'
 ];
 for (const file of required) {
   if (!(await fs.stat(path.join(root, file))).isFile()) throw new Error(`Missing package file: ${file}`);

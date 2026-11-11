@@ -4,11 +4,17 @@ import { readFile, writeFile, mkdir, unlink, realpath, rename, lstat } from 'nod
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { scanProject, getMap, analyzeImpact, createTask, listTasks, getTask, reviewTask, getStateDir } from './core.mjs';
+import { scanProject, getMap, analyzeImpact, createTask, listTasks, getTask, reviewTask, getStateDir, workspaceRoute, workspaceRead, closeWorkspace } from './core.mjs';
 
 const assets = fileURLToPath(new URL('../../assets/', import.meta.url));
 const routes = new Map([
-  ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/', ['workbench.html', 'text/html; charset=utf-8']],
+  ['/assurance-ui.js', ['assurance-ui.js', 'text/javascript; charset=utf-8']],
+  ['/safety-ui.js', ['safety-ui.js', 'text/javascript; charset=utf-8']],
+  ['/bridge-ui.js', ['bridge-ui.js', 'text/javascript; charset=utf-8']],
+  ['/workbench.js', ['workbench.js', 'text/javascript; charset=utf-8']],
+  ['/workbench.css', ['workbench.css', 'text/css; charset=utf-8']],
+  ['/legacy', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
@@ -56,9 +62,9 @@ function launchBrowser(url) {
   } catch { /* The printed local URL remains usable when a browser launcher is unavailable. */ }
 }
 
-export async function startServer({ projectRoot, stateDir, port = 0, open = false } = {}) {
+export async function startServer({ projectRoot, stateDir, port = 0, open = false, codex = false } = {}) {
   const root = await realpath(path.resolve(projectRoot || process.cwd()));
-  const options = { stateDir };
+  const options = { stateDir, codex };
   await scanProject(root, options);
   const token = randomBytes(32).toString('hex');
   let address;
@@ -81,6 +87,8 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
           const [file, type] = routes.get(url.pathname);
           return reply(res, 200, await readFile(path.join(assets, file)), type);
         }
+        const extra = await workspaceRead(root, url.pathname, options);
+        if (extra) return reply(res, extra.status || 200, extra.value, extra.type);
         if (url.pathname === '/healthz') return reply(res, 200, { ok: true });
         if (url.pathname === '/api/session') return reply(res, 200, { token });
         if (url.pathname === '/api/map') return reply(res, 200, await getMap(root, options));
@@ -99,6 +107,8 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
       if (!tokenMatches(req.headers['x-project-map-token'], token)) throw error('Refresh the page to renew the local session.', 403, 'INVALID_SESSION');
       const input = await body(req);
       const run = async () => {
+        const extra = await workspaceRoute(root, url.pathname, input, options);
+        if (extra) return extra;
         if (url.pathname === '/api/refresh') return { value: await scanProject(root, options), status: 200 };
         if (url.pathname === '/api/impact') return { value: analyzeImpact(await getMap(root, options), input), status: 200 };
         if (url.pathname === '/api/tasks') return { value: summarizeTask(await createTask(root, input, options)), status: 201 };
@@ -132,6 +142,7 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
   await writeFile(infoTemp, JSON.stringify({ pid: process.pid, url, projectRoot: root, startedAt: new Date().toISOString() }, null, 2), { mode: 0o600, flag: 'wx' });
   await rename(infoTemp, infoPath);
   const close = async () => {
+    await closeWorkspace(root, options);
     await new Promise(resolve => server.close(resolve));
     try {
       if ((await lstat(infoPath)).isSymbolicLink()) return;
