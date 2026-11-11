@@ -54,3 +54,28 @@ Receipts include real exit codes, limited/redacted output and source fingerprint
 Changed code or a new plan makes evidence stale. A screenshot attachment does not
 make a function pass; bare check statuses remain agent reports, not tool proof.
 This release does not automatically launch the target app or take screenshots.
+
+## Phase 3 — Checkpoints, restoration and resumption (v0.5.0)
+
+Starting a reviewed plan stores the actual current bytes of its planned source
+files, including pre-existing uncommitted changes. A revised plan preserves the
+first backup and adds newly planned files. Backups are local private state, may
+contain sensitive source, and must never be committed. They are not Git commits.
+Files outside the write plan and external systems are not backed up.
+
+Completion or explicit pause seals expected final file hashes. Restore first
+shows affected paths, then requires confirmation of a five-minute preview token.
+It refuses changed files, symbolic links, damaged backups and an overlapping
+running task. Unrelated changes are not reset. Before mutation it preserves
+recovery copies and a journal. Multi-file restoration is not an atomic filesystem
+transaction: interruption can leave a partial restore. Inspect ignored
+`.project-map/recovery/` before further edits; never automatically force restoration.
+
+The ordinary dashboard cannot stop an external Codex process. Stop it in Codex
+first, then acknowledge that fact to record pause. Resume prepares a fresh plan
+for user review, not silent approval. Source changes do not reuse stale approval.
+The UI distinguishes request saved, plan review, approved but not executing,
+running and completed-with-verification-pending states.
+
+Restoring code does not undo database changes, payments, sent messages or a
+production deployment. Such work needs its own explicit backup/recovery plan.

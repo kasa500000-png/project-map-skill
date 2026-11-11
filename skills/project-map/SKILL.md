@@ -118,3 +118,17 @@ actual screenshot, use `{kind:"image",name,file:relativePath,stage:"before"|"aft
 Use only real PNG/JPEG captures, preferably under `.project-map/`. The tool does
 not take screenshots itself. Explain stale evidence and reported-only checks.
 Do not turn a receipt for a generic test into proof of every planned outcome.
+
+## Pause, restore and continue
+
+`start` creates a local checkpoint of planned files, preserving their existing
+dirty contents. If checkpoint creation fails, stop before editing. Never stage
+`.project-map/`: backups can contain private source. On completion, checkpoint
+hashes are sealed. The dashboard offers preview and explicit confirmation before
+restoration and refuses later edits to those same files. It does not revert
+unrelated changes or external systems. If restoration is interrupted, inspect
+its recovery journal rather than forcing a new restore.
+
+A dashboard pause acknowledgment is not process cancellation. Stop external
+Codex execution first. The resume action publishes a current plan and requires
+user review again. Never self-approve it or bypass stale-source checks.

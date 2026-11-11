@@ -6,6 +6,7 @@ import { buildFeatureMap, resolveSelection, suggestIntent } from './feature-map.
 export * from './analyzer.mjs';
 import { beginAudit, auditPlan, assertAuditFresh, finishAudit, assuranceView, recordEvidence, evidenceResponse } from './assurance.mjs';
 export { recordEvidence } from './assurance.mjs';
+import { checkpoint, sealCheckpoint, safetyView, restorePreview, restoreApply, resumePlan } from './safety.mjs';
 
 async function configAt(root) {
   try {
@@ -40,7 +41,8 @@ async function decorateTask(task, root, options) {
     featureLabels: Object.fromEntries(map.nodes.map(node => [node.id, map.featureGraph.nodes.filter(f => f.entryNodeIds.includes(node.id)).map(f => f.label).join(' / ') || node.label])),
     beforeGraph: project(task.plan?.beforeGraph), expectedGraph: project(task.plan?.afterGraph),
     actualGraph: project(task.result?.afterGraph),
-    assurance: await assuranceView(root, task, options)
+    assurance: await assuranceView(root, task, options),
+    safety: await safetyView(root, task, options)
   } };
 }
 export async function getTask(root, id, options = {}) { return decorateTask(await core.getTask(root, id, options), root, options); }
@@ -56,15 +58,35 @@ export async function reviewTask(root, id, input, options = {}) {
 }
 export async function updateTask(root, id, input, options = {}) {
   if (input.status === 'running') await assertAuditFresh(root, await core.getTask(root,id,options), options);
-  return decorateTask(await core.updateTask(root, id, input, options), root, options);
+  const task = await core.updateTask(root, id, input, options);
+  if (input.status === 'running') {
+    try { await checkpoint(root,task,options); }
+    catch(error) { await core.updateTask(root,id,{status:'blocked',note:'체크포인트 실패. 소스 수정 전에 원인을 확인하세요.'},options);throw error; }
+  }
+  if (input.status === 'blocked') await sealCheckpoint(root,task,options);
+  return decorateTask(task, root, options);
 }
 export async function completeTask(root, id, input, options = {}) {
+  const existing = await core.getTask(root,id,options);
+  if(existing.status === 'completed') return decorateTask(existing,root,options);
   const task = await core.completeTask(root, id, input, options);
   await finishAudit(root,task,options);
+  await sealCheckpoint(root,task,options);
   return decorateTask(task, root, options);
 }
 
 export async function workspaceRoute(root, route, input, options = {}) {
+  const safety = route.match(/^\/api\/tasks\/([^/]+)\/(pause|resume-plan|restore-preview|restore-apply)$/);
+  if(safety) {
+    const task = await core.getTask(root,safety[1],options); let value;
+    if(safety[2] === 'pause') {
+      if(input.executionStopped !== true) throw Object.assign(new Error('Codex 실행을 먼저 중단한 후 기록하세요.'),{statusCode:409});
+      value = await updateTask(root,task.id,{status:'blocked',note:'사용자가 실행 중단을 확인함'},options);
+    } else if(safety[2] === 'resume-plan') value = await proposeTask(root,task.id,resumePlan(task,await scanProject(root,options)),options);
+    else if(safety[2] === 'restore-preview') value = await restorePreview(root,task,options);
+    else value = await restoreApply(root,task,input.token,options);
+    return {value,status:200};
+  }
   if (route !== '/api/features/rename') return null;
   const map = await scanProject(root, options);
   if (input.snapshotId !== map.snapshotId) throw Object.assign(new Error('코드가 변경되었습니다. 새로고침 후 이름을 수정하세요.'), { statusCode: 409 });
