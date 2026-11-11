@@ -6,7 +6,7 @@ import os from 'node:os';
 import { installSkill, uninstallSkill } from '../scripts/install.mjs';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-map-installer-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'project-map-installer-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const source = path.join(root, 'source');
   const target = path.join(root, 'target');

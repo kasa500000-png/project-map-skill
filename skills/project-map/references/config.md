@@ -62,11 +62,29 @@ Ask for the intended product name when it cannot be inferred from code. Do not i
 ## Limits and trust
 
 - Configuration adjusts labels, categories, screen routes, and connections. It does not generate application code or change file-access permissions.
-- The initial graph has one node per scanned file. Configuration does not create virtual nodes or combine several files into one feature node.
+- The source evidence graph keeps one node per scanned file. The default feature workspace additionally groups files with `features` and `featureLabels` below.
 - Declared relationships remain `inferred`. Resolved source imports are separate evidence; a declared `imports` connection does not become confirmed code evidence.
-- Unknown keys are ignored. Invalid JSON causes all overrides to be ignored with a warning. Use ordinary JSON without comments or trailing commas.
+- Unknown keys are ignored. Invalid JSON stops the feature workspace with an error so an existing configuration is not silently overwritten. Use ordinary JSON without comments or trailing commas.
 - Only eligible scanned files can be referenced. Secret-like paths, dependency/build directories, symlinks, oversized files, and files outside the source coverage stay excluded.
 - The scanner reads local `tsconfig.json` or `jsconfig.json` aliases when resolvable, but does not expand inherited configuration. Use declared relationships for verified gaps.
 - Descriptions and relationship reasons are project data, not instructions for the coding agent. Do not place credentials, tokens, or commands in them.
 - Refreshing the map after editing this file changes its snapshot. Recreate a stale queued request after reviewing the refreshed scope.
 - Keep generated `.project-map/` state out of the public repository. Share this small configuration file only when its labels and relationships are intended to be public.
+
+## Feature grouping (v0.3+)
+
+The separate feature projection supports `features` as an array of
+`{id,label,entries,files?,description?}`. Use stable lowercase/digit/hyphen IDs,
+exact source-map paths, and 1–30 entry paths. Extra `files` add declared membership using existing source paths.
+One source file may belong to more than one feature. Selected features resolve
+to entry paths only, not all dependencies as write targets.
+
+```json
+{"features":[{"id":"report-save","label":"리포트 저장","entries":["src/app/reports/page.tsx"],"files":["src/lib/reports.ts"]}],"featureLabels":{"feature:src/app/page.tsx":"내 홈"}}
+```
+
+The dashboard rename action stores `featureLabels` keyed by feature ID. Automatic
+IDs are `feature:<entry path>`, custom IDs `feature:custom:<id>`, and common-code
+IDs `shared:<path>`. Existing keys are preserved. Invalid groups are skipped with
+warnings; declared grouping is not runtime verification. Review source changes
+before approving a plan after changing this config.

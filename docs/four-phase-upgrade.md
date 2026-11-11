@@ -79,3 +79,42 @@ running and completed-with-verification-pending states.
 
 Restoring code does not undo database changes, payments, sent messages or a
 production deployment. Such work needs its own explicit backup/recovery plan.
+
+## Phase 4 — Refresh reuse, task conflicts and optional Codex bridge (v0.6.0)
+
+Refresh checks content hashes and Git identity/status. An unchanged, complete
+inventory reuses the validated map. Changed or incomplete input triggers a full
+rebuild. The response reports `refresh.mode` and changed paths. This is **snapshot
+reuse, not a per-file incremental parser**; hashing still reads eligible files.
+Safety-critical plan/start operations retain fresh source and broad-file checks.
+Task list polling no longer decorates every historical task.
+
+Comparisons use two concrete plans: write/write and write/read overlap, shared
+API/table references, and sensitive shared configuration. Read/read sharing alone
+does not imply conflict. Results are conflict, coordination needed, unknown, or
+conditional; no result guarantees runtime independence. At most 30 pending peers
+are compared. There is no automatic parallel agent or worktree orchestration.
+
+An optional bridge uses the locally installed, already authenticated Codex CLI:
+
+```bash
+node skills/project-map/scripts/project-map.mjs serve --project /path/to/app --open --codex
+```
+
+Without `--codex`, the portable copied-prompt workflow is unchanged. With it, the
+user can send a selected request, explicitly approve a published plan, explicitly
+start execution, inspect progress/permission requests, and interrupt the bridge's
+own turn. The bridge never installs Codex, signs in, stores an API key, auto-runs
+old tasks, or silently accepts permissions. Existing Codex usage limits/costs apply.
+
+Planning requests use read-only sandbox policy and cannot approve themselves.
+Execution uses workspace-write, network disabled by default, and one-shot user
+approvals. The host validates structured output and owns task lifecycle. One turn
+runs at a time per local project connection. Pending application changes survive
+a dropped connection; reconnection is not proof of successful completion.
+Unsupported protocol/permission requests fail closed. Copy handoff remains usable.
+
+The adapter has been exercised with a deterministic stdio process, not a real
+Codex model/account. Live installed-version compatibility, authentication, and
+model-generated plans require user-side acceptance testing. No live target app
+or external data was modified in development tests. See `docs/validation.md`.

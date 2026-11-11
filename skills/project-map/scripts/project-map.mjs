@@ -8,6 +8,7 @@ import { main as commands } from './commands.mjs';
 import { getStateDir, getTask, recordEvidence } from './lib/core.mjs';
 import { readFile } from 'node:fs/promises';
 import { VERSION } from './lib/version.mjs';
+import { startServer } from './lib/server.mjs';
 
 export async function main(argv = process.argv.slice(2)) {
   if (Number(process.versions.node.split('.')[0]) < 20) throw new Error('Node.js 20 or newer is required.');
@@ -18,7 +19,7 @@ Usage: node project-map.mjs COMMAND --project /path/to/app [options]
   evidence --id ID --file JSON   Record an explicit check command or PNG/JPEG
   doctor                         Check runtime and selected project
   scan [--summary]               Refresh the map
-  serve [--open] [--port N]      Open the feature workspace on loopback
+  serve [--open] [--codex]        Open workspace; optional explicit Codex bridge
   impact --node PATH             Inspect initial impact
   tasks [--status queued]        List saved requests
   task --id ID                   Read the request and feature context
@@ -31,6 +32,16 @@ Usage: node project-map.mjs COMMAND --project /path/to/app [options]
 Use --state-dir PATH for custom local state. Plans and checks follow the schemas
 in references/plan-format.md. The agent must never approve its own plan.
 `); return;
+  }
+  if (argv[0] === 'serve' && argv.includes('--codex')) {
+    const args={};for(let i=1;i<argv.length;i++) {
+      const key=argv[i];if(['--codex','--open'].includes(key)){args[key]=true;continue;}
+      if(!['--project','--state-dir','--port'].includes(key)||!argv[i+1]||argv[i+1].startsWith('--'))throw new Error('Invalid serve option.');args[key]=argv[++i];
+    }
+    const port=Number(args['--port']||0);if(!Number.isInteger(port)||port<0||port>65535)throw new Error('Invalid port.');
+    const instance=await startServer({projectRoot:args['--project']||process.cwd(),stateDir:args['--state-dir'],port,open:!!args['--open'],codex:true});
+    console.log(JSON.stringify({status:'listening',url:instance.url,codex:'opt-in: starts only after explicit send',projectRoot:instance.projectRoot}));
+    let closing=false;for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(closing)return;closing=true;await instance.close();process.exit(0);});return instance;
   }
   if (argv[0] === 'evidence') {
     const args = {};

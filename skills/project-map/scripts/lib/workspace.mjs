@@ -7,6 +7,11 @@ export * from './analyzer.mjs';
 import { beginAudit, auditPlan, assertAuditFresh, finishAudit, assuranceView, recordEvidence, evidenceResponse } from './assurance.mjs';
 export { recordEvidence } from './assurance.mjs';
 import { checkpoint, sealCheckpoint, safetyView, restorePreview, restoreApply, resumePlan } from './safety.mjs';
+import { refreshMap, taskComparisons } from './efficiency.mjs';
+import { inventory } from './inventory.mjs';
+import { CodexBridge } from './codex-bridge.mjs';
+const bridges = new Map();
+const bridgeKey = (root,options) => `${path.resolve(root)}:${options.stateDir || '.project-map'}`;
 
 async function configAt(root) {
   try {
@@ -20,7 +25,7 @@ async function configAt(root) {
 async function decorate(map) {
   return { ...map, featureGraph: buildFeatureMap(map, await configAt(map.project.root)) };
 }
-export async function scanProject(root, options = {}) { return decorate(await core.scanProject(root, options)); }
+export async function scanProject(root, options = {}) { return decorate(await refreshMap(root, options)); }
 export async function getMap(root, options = {}) { return decorate(await core.getMap(root, options)); }
 export function analyzeImpact(map, input = {}) {
   const resolved = resolveSelection(map, input);
@@ -37,16 +42,18 @@ export async function createTask(root, input, options = {}) {
 async function decorateTask(task, root, options) {
   const config = await configAt(root), map = await getMap(root, options);
   const project = graph => graph ? buildFeatureMap({ ...graph, files: [] }, config) : null;
-  return { ...task, experience: {
+  const decorated = { ...task, experience: {
     featureLabels: Object.fromEntries(map.nodes.map(node => [node.id, map.featureGraph.nodes.filter(f => f.entryNodeIds.includes(node.id)).map(f => f.label).join(' / ') || node.label])),
     beforeGraph: project(task.plan?.beforeGraph), expectedGraph: project(task.plan?.afterGraph),
     actualGraph: project(task.result?.afterGraph),
     assurance: await assuranceView(root, task, options),
     safety: await safetyView(root, task, options)
   } };
+  decorated.experience.parallel = await taskComparisons(root,decorated,map,options);
+  return decorated;
 }
 export async function getTask(root, id, options = {}) { return decorateTask(await core.getTask(root, id, options), root, options); }
-export async function listTasks(root, options = {}) { return Promise.all((await core.listTasks(root, options)).map(task => decorateTask(task, root, options))); }
+export async function listTasks(root, options = {}) { return core.listTasks(root, options); }
 export async function proposeTask(root, id, input, options = {}) {
   const task = await core.proposeTask(root, id, input, options);
   await auditPlan(root, task, await getMap(root, options), options);
@@ -76,8 +83,18 @@ export async function completeTask(root, id, input, options = {}) {
 }
 
 export async function workspaceRoute(root, route, input, options = {}) {
+  if (route.startsWith('/api/codex/')) {
+    if(!options.codex) throw Object.assign(new Error('직접 연결은 기본으로 꺼져 있습니다. --codex로 서버를 시작하세요.'),{statusCode:403});
+    const bridge = bridgeFor(root, options); let value;
+    if(route==='/api/codex/run') value=await bridge.run(input.id,input.phase);
+    else if(route==='/api/codex/interrupt') value=await bridge.interrupt();
+    else if(route==='/api/codex/decision') value=await bridge.decide(input.id,input.decision);
+    else return null;
+    return {value,status:200};
+  }
   const safety = route.match(/^\/api\/tasks\/([^/]+)\/(pause|resume-plan|restore-preview|restore-apply)$/);
   if(safety) {
+    if(bridges.get(bridgeKey(root,options))?.active) throw Object.assign(new Error('직접 연결된 Codex 작업을 먼저 중단하고 완료 상태를 확인하세요.'),{statusCode:409});
     const task = await core.getTask(root,safety[1],options); let value;
     if(safety[2] === 'pause') {
       if(input.executionStopped !== true) throw Object.assign(new Error('Codex 실행을 먼저 중단한 후 기록하세요.'),{statusCode:409});
@@ -102,5 +119,15 @@ export async function workspaceRoute(root, route, input, options = {}) {
 }
 
 // Extension points share the server's same-origin, session-token protection.
-export async function workspaceRead(root, route, options = {}) { return evidenceResponse(root, route, options); }
-export async function closeWorkspace() {}
+function bridgeFor(root,options) {
+  const key=bridgeKey(root,options);if(!bridges.has(key)) bridges.set(key,new CodexBridge({root,handlers:{
+    get:id=>getTask(root,id,options), fingerprint:async()=>(await inventory(root,options)).fingerprint,
+    plan:(id,plan)=>proposeTask(root,id,plan,options), start:id=>updateTask(root,id,{status:'running'},options),
+    complete:(id,result)=>completeTask(root,id,result,options), block:(id,message)=>updateTask(root,id,{status:'blocked',note:String(message).slice(0,1000)},options)
+  }}));return bridges.get(key);
+}
+export async function workspaceRead(root, route, options = {}) {
+  if(route==='/api/connection') return {value: options.codex ? bridgeFor(root,options).status() : {enabled:false,connected:false,active:null,approvals:[]},status:200};
+  return evidenceResponse(root, route, options);
+}
+export async function closeWorkspace(root,options={}) {const key=bridgeKey(root,options),bridge=bridges.get(key);if(bridge){await bridge.close();bridges.delete(key);}}

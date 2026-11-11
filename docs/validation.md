@@ -1,60 +1,59 @@
-# Validation of v0.2
+# Validation record — four-phase upgrade
 
-Recorded on 2026-11-10 with Node.js 24.22.1 in the development environment.
-The supported runtime minimum remains Node.js 20; this record does not claim a
-separate run on every supported Node version or on macOS.
+## Executed in the development environment
 
-## Automated checks
+| Milestone | Node tests | Result |
+| --- | ---: | --- |
+| Existing v0.2 baseline | 66 | Passed |
+| Phase 1: feature workspace | 74 | Passed |
+| Phase 2: impact/audit/evidence | 83 | Passed |
+| Phase 3: checkpoint/restore/resume | 91 | Passed |
+| Phase 4: cache/conflicts/optional bridge | 108 | Passed, no skipped tests |
 
-`npm test`: **66 passed, 0 failed, 0 skipped**.
+`npm run check` validates required files and JavaScript syntax. `npm test` uses
+Node's test runner, temporary synthetic projects and real local HTTP API calls.
+The original 66 regressions are retained. New cases include shared membership,
+name persistence, stale asset detection, wider file audits, actual command exit
+receipts, image registration, unsafe paths/symlinks, checkpoint tampering,
+concurrent edits, partial workflow resumption, cache invalidation, task conflicts,
+and fail-closed bridge permission/protocol behavior.
 
-| Area | Coverage |
-| --- | --- |
-| Source map | Supported imports, route identification, configured names, ignored files, symlinks and incomplete scans |
-| Screen flow | Literal links/calls, dynamic route matching, reused components, bounded layout projection, ambiguity and omission warnings |
-| Plan lifecycle | First review, revisions, stale snapshots, exact approval, new/removed nodes, no-op plans and replanning during work |
-| Results | Original baseline comparison, reviewed write scope, per-feature checks, unverified outcomes and linked follow-up tasks |
-| Local HTTP API | Loopback host/origin restrictions, session token, request validation, plan review and task/result responses |
-| UI events | Source arrows, selection, request saving, plan/revision/review, results, deletion preview, stale review, follow-up and language switching against the real HTTP API with a mock DOM |
-| Installation and CLI | Owned links/copies, preserving local edits, paths with spaces, plan files, review, start and completion |
+## Browser coverage
 
-`npm run check`: required package files and **15 JavaScript files** passed syntax
-validation. The installed skill also passed its frontmatter/name validator.
+`tests/browser_component.py` ran the shipped UI in real headless Chromium at
+1440×1000 and 390×844. It exercised selection, impact preview, request save,
+plan approval, completion/evidence/safety panels, and checked document overflow.
+The DOM/CSS/JavaScript were real; fetch responses were controlled offline fixtures
+produced by the real Node workflow. This is an **offline browser component test**,
+not integrated browser-to-localhost E2E. Direct browser localhost navigation was
+blocked by the environment; HTTP APIs were tested independently in Node. No
+restriction was bypassed. The old mock-DOM tests remain as additional regressions.
 
-A separate code review found a deletion/replanning issue: an already deleted
-screen could be rejected by a revised plan or reappear in its expected graph.
-The fix was checked using the original reproduction and covered by regression
-tests. Current/expected graphs retain the deletion while the final result keeps
-the original comparison baseline.
+## Codex adapter coverage
 
-## Browser and target-app limits
+Bridge tests spawn a deterministic stdio child process and inspect real protocol
+messages. They cover initialize/notification sequencing, read-only planning,
+approval gating, workspace-write/network policy, explicit one-shot permissions,
+refusal of privilege expansion, unsupported requests, interruption, disconnect,
+stale model output and path traversal in grant roots.
 
-The UI test uses a mock DOM; it is not a browser layout test. A real Chromium
-check was attempted, but the development environment blocked a local socket
-needed to launch the browser. An elevated run was refused by the environment's
-approval policy. The available shared browser also could not reach the local
-test server. Desktop/mobile rendering and screenshots are therefore **not
-verified in this record**.
+No installed authenticated Codex executable or live model was available. The
+adapter's live account/version compatibility and model behavior are **not verified**.
+No actual target application or production data was modified by these tests.
 
-The bundled sample is source-only. Its real application behavior is not tested
-by scanning it or by testing the Project Map dashboard. Expected feature results
-remain unverified until a suitable app-specific check is actually performed.
+## Continuous integration
 
-## Reproduce the automated checks
+The repository workflow runs package and Node tests on Linux and macOS with
+Node 22. Inspect the actual workflow result for a given commit; configuring the
+matrix is not itself a passing result. Hosted macOS tests are not GUI validation
+on the user's Mac. The offline browser script is optional and is not part of the
+Node suite; it requires Playwright and an installed Chromium.
 
-From the repository root, with Node.js available:
+## Remaining acceptance work
 
-```bash
-npm test
-npm run check
-```
-
-No npm dependency installation is required. To inspect the local UI on a Mac:
-
-```bash
-node skills/project-map/scripts/project-map.mjs serve --project examples/sample-app --open
-```
-
-Check the visible flow arrows, feature selection, scrolling, plan comparisons
-and controls in the browser. Use Codex with the saved request ID to prepare a
-plan; review the plan before continuing with source edits.
+Try a real app on the user's Mac: feature naming/grouping; small display change;
+shared-component change; data-related change; actual before/after app captures;
+interrupted task and safe restore; opt-in direct Codex plan/execute/permission flow.
+Confirm expected UI behavior, not just file hashes. Collect usability observations
+from nondevelopers before claiming productivity gains or readiness for unattended
+use. No token/time savings percentage is asserted.

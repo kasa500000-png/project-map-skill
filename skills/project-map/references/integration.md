@@ -1,53 +1,26 @@
-# Local integration
+# Current integration (v0.6)
 
-## Commands
+Default: loopback browser plus explicit copied request prompts in Codex. Optional:
+`serve --codex` uses the local CLI App Server; read [bridge.md](bridge.md) first.
+The public launcher also exposes `evidence --id ID --file SPEC_JSON` for explicit
+command receipts or registered PNG/JPEG images. No HTTP endpoint accepts arbitrary
+shell text. Optional Codex execution itself is requested by task ID/phase and
+retains user review and sandbox/permission handling.
 
-Run `node scripts/project-map.mjs --help` from the skill directory for the exact contract. Commands accept `--project`; normal data output is JSON. `serve` prints its URL and remains running; `wait` lasts at most 50 seconds.
+Additional same-origin/session-protected POST routes:
+`/api/features/rename`, `/api/tasks/ID/pause`, `/api/tasks/ID/resume-plan`,
+`/api/tasks/ID/restore-preview`, `/api/tasks/ID/restore-apply`, and optional
+`/api/codex/run`, `/api/codex/interrupt`, `/api/codex/decision`.
+GET `/api/connection` reports mode and progress. GET `/api/evidence/ID/EVIDENCE_ID`
+serves only registered hash-checked raster images. Generated project state,
+backups and evidence must remain private and ignored.
 
-| Command | Purpose |
-| --- | --- |
-| doctor | Check runtime and project |
-| scan --summary | Refresh map with compact coverage counts |
-| serve --open | Open map and request composer |
-| impact --node PATH --intent behavior --request TEXT | Preview scope |
-| tasks --status queued | Find saved requests |
-| task --id ID | Read scoped task context |
-| plan --id ID --file PATH | Publish the agent's plan and expected graph for user review |
-| review --id ID --decision approve --revision NUMBER --snapshot ID | Record an explicit user decision from the current conversation |
-| start --id ID | Check current approval and freshness, then mark running |
-| complete --id ID --summary TEXT --checks-file PATH | Record changes and feature-linked checks |
-| wait --timeout 50 | Wait for queued or approved work during an active agent session |
+The server's direct adapter is opt-in. Code execution, approval, backup and
+verification are separate states. Restore does not undo external systems.
+Official App Server contract: https://developers.openai.com/codex/app-server
 
-Node IDs are relative source paths. Quote paths containing spaces. Construct arguments safely rather than concatenating untrusted shell text.
-
-## Handoff
-
-The local UI saves requests and plan-review decisions. It cannot edit source or run shell commands. An active agent reads the selected task, writes a plan using [plan-format.md](plan-format.md), then implements the reviewed plan. Saving or approving cannot launch an idle Codex process. `wait --status approved` can wait specifically for reviewed work.
-
-Supported desktop hosts expose `document.oai.annotation.request`. The UI can open an annotation carrying the task ID; the user submits it. `accepted` is only an acknowledgment. Other browsers use a copy-and-paste handoff.
-
-A cloud-container URL is not automatically reachable on the user's Mac. Run locally or use the host's preview. A file:// page cannot provide the local JSON API.
-
-## HTTP API
-
-GET `/api/session` returns a process-local token. POST requests require JSON and `X-Project-Map-Token`. Browser origins and Host headers are restricted to the loopback server; no public exposure or CORS is provided.
-
-- GET `/api/map`: current map
-- POST `/api/refresh`: refresh source index
-- POST `/api/impact`: `{nodeIds,intent,request}`
-- GET `/api/tasks`: requests without large baselines
-- POST `/api/tasks`: `{nodeIds,intent,request,snapshotId,parentTaskId?}`
-- GET `/api/tasks/ID`: request and recorded result
-- POST `/api/tasks/ID/review`: `{decision:"approve"|"revise",revision,snapshotId,note?}`
-- GET `/api/changes?task=ID`: plan, review and actual change result
-
-No shell-execution, arbitrary-file-read, push or deployment endpoint exists. Normal agent tools perform code edits under existing permissions.
-
-## Official references
-
-Checked 2026-11-09; feature-detect the actual host.
-
-- [Codex skills](https://learn.chatgpt.com/docs/build-skills)
-- [Browser annotations](https://learn.chatgpt.com/docs/annotations-extensibility)
-- [Codex App Server](https://learn.chatgpt.com/docs/app-server): possible future adapter, not implemented
-- [MCP UI](https://developers.openai.com/plugins/build/chatgpt-ui): optional supported-host alternative
+CLI lifecycle remains: `doctor`, `scan`, `serve`, `impact`, `tasks`, `task`,
+`plan --file PLAN_JSON`, `review --decision approve|revise --revision N --snapshot ID`,
+`start`, `complete --checks-file CHECKS_JSON`, `wait --timeout 50`.
+Use the exact help from the installed public launcher; node IDs are relative source
+paths. Quote paths safely. Do not interpolate untrusted task text into shell code.

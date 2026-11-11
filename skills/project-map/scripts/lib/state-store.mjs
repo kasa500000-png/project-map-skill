@@ -26,7 +26,7 @@ export async function stateRoot(root, options = {}) {
   const project = await fs.realpath(root), state = path.resolve(project, options.stateDir || '.project-map');
   if (state === project) throw problem('State must be separate from source.');
   for (let p = state; p !== path.dirname(p); p = path.dirname(p)) {
-    try { const s = await fs.lstat(p); if (s.isSymbolicLink() || !s.isDirectory()) throw problem('Unsafe state directory.', 'UNSAFE_PATH'); }
+    try { const s = await fs.lstat(p); if (s.isSymbolicLink() || !s.isDirectory()) throw problem('Unsafe state directory.', 'UNSAFE_STATE_PATH'); }
     catch (e) { if (e.code !== 'ENOENT') throw e; }
   }
   await fs.mkdir(state, { recursive: true, mode: 0o700 });

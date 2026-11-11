@@ -7,7 +7,11 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +28,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: project-map-tested-source
+          name: project-map-tested-source-${{ runner.os }}
           path: /tmp/project-map-source.tar.gz
           retention-days: 3
