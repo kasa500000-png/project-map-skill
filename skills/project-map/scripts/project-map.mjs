@@ -5,7 +5,8 @@ import { constants } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { main as commands } from './commands.mjs';
-import { getStateDir } from './lib/core.mjs';
+import { getStateDir, getTask, recordEvidence } from './lib/core.mjs';
+import { readFile } from 'node:fs/promises';
 import { VERSION } from './lib/version.mjs';
 
 export async function main(argv = process.argv.slice(2)) {
@@ -14,6 +15,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`Project Map ${VERSION} — feature map → plan → review → implementation → evidence.
 Usage: node project-map.mjs COMMAND --project /path/to/app [options]
 
+  evidence --id ID --file JSON   Record an explicit check command or PNG/JPEG
   doctor                         Check runtime and selected project
   scan [--summary]               Refresh the map
   serve [--open] [--port N]      Open the feature workspace on loopback
@@ -29,6 +31,17 @@ Usage: node project-map.mjs COMMAND --project /path/to/app [options]
 Use --state-dir PATH for custom local state. Plans and checks follow the schemas
 in references/plan-format.md. The agent must never approve its own plan.
 `); return;
+  }
+  if (argv[0] === 'evidence') {
+    const args = {};
+    for (let i=1;i<argv.length;i+=2) {
+      if (!['--project','--state-dir','--id','--file'].includes(argv[i]) || !argv[i+1] || argv[i+1].startsWith('--')) throw new Error('evidence accepts --project, --state-dir, --id, --file.');
+      args[argv[i]]=argv[i+1];
+    }
+    const root=await realpath(path.resolve(args['--project'] || process.cwd())), options={stateDir:args['--state-dir']};
+    const task=await getTask(root,args['--id'],options);
+    const spec=JSON.parse(await readFile(args['--file'],'utf8'));
+    console.log(JSON.stringify(await recordEvidence(root,task,spec,options),null,2));return;
   }
   if (argv[0] === 'doctor') {
     const allowed = new Set(['--project', '--state-dir']); const values = {};

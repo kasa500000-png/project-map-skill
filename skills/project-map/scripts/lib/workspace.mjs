@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 import * as core from './analyzer.mjs';
 import { buildFeatureMap, resolveSelection, suggestIntent } from './feature-map.mjs';
 export * from './analyzer.mjs';
+import { beginAudit, auditPlan, assertAuditFresh, finishAudit, assuranceView, recordEvidence, evidenceResponse } from './assurance.mjs';
+export { recordEvidence } from './assurance.mjs';
 
 async function configAt(root) {
   try {
@@ -27,7 +29,9 @@ export function analyzeImpact(map, input = {}) {
 export async function createTask(root, input, options = {}) {
   const map = await getMap(root, options), resolved = resolveSelection(map, input);
   resolved.intent = resolved.intent === 'auto' || !resolved.intent ? suggestIntent(resolved.request || '') : resolved.intent;
-  return decorateTask(await core.createTask(root, resolved, options), root, options);
+  const task = await core.createTask(root, resolved, options);
+  await beginAudit(root, task, options);
+  return decorateTask(task, root, options);
 }
 async function decorateTask(task, root, options) {
   const config = await configAt(root), map = await getMap(root, options);
@@ -35,15 +39,30 @@ async function decorateTask(task, root, options) {
   return { ...task, experience: {
     featureLabels: Object.fromEntries(map.nodes.map(node => [node.id, map.featureGraph.nodes.filter(f => f.entryNodeIds.includes(node.id)).map(f => f.label).join(' / ') || node.label])),
     beforeGraph: project(task.plan?.beforeGraph), expectedGraph: project(task.plan?.afterGraph),
-    actualGraph: project(task.result?.afterGraph)
+    actualGraph: project(task.result?.afterGraph),
+    assurance: await assuranceView(root, task, options)
   } };
 }
 export async function getTask(root, id, options = {}) { return decorateTask(await core.getTask(root, id, options), root, options); }
 export async function listTasks(root, options = {}) { return Promise.all((await core.listTasks(root, options)).map(task => decorateTask(task, root, options))); }
-export async function proposeTask(root, id, input, options = {}) { return decorateTask(await core.proposeTask(root, id, input, options), root, options); }
-export async function reviewTask(root, id, input, options = {}) { return decorateTask(await core.reviewTask(root, id, input, options), root, options); }
-export async function updateTask(root, id, input, options = {}) { return decorateTask(await core.updateTask(root, id, input, options), root, options); }
-export async function completeTask(root, id, input, options = {}) { return decorateTask(await core.completeTask(root, id, input, options), root, options); }
+export async function proposeTask(root, id, input, options = {}) {
+  const task = await core.proposeTask(root, id, input, options);
+  await auditPlan(root, task, await getMap(root, options), options);
+  return decorateTask(task, root, options);
+}
+export async function reviewTask(root, id, input, options = {}) {
+  if (input.decision === 'approve') await assertAuditFresh(root, await core.getTask(root,id,options), options);
+  return decorateTask(await core.reviewTask(root, id, input, options), root, options);
+}
+export async function updateTask(root, id, input, options = {}) {
+  if (input.status === 'running') await assertAuditFresh(root, await core.getTask(root,id,options), options);
+  return decorateTask(await core.updateTask(root, id, input, options), root, options);
+}
+export async function completeTask(root, id, input, options = {}) {
+  const task = await core.completeTask(root, id, input, options);
+  await finishAudit(root,task,options);
+  return decorateTask(task, root, options);
+}
 
 export async function workspaceRoute(root, route, input, options = {}) {
   if (route !== '/api/features/rename') return null;
@@ -61,5 +80,5 @@ export async function workspaceRoute(root, route, input, options = {}) {
 }
 
 // Extension points share the server's same-origin, session-token protection.
-export async function workspaceRead() { return null; }
+export async function workspaceRead(root, route, options = {}) { return evidenceResponse(root, route, options); }
 export async function closeWorkspace() {}
