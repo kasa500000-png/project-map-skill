@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as core from './analyzer.mjs';
+import { projectMutation, claimExecution, releaseExecution, assertNoOtherExecution } from './task-lock.mjs';
+import { finalize } from './finalize.mjs';
 import { buildFeatureMap, resolveSelection, suggestIntent } from './feature-map.mjs';
 export * from './analyzer.mjs';
 import { beginAudit, auditPlan, assertAuditFresh, finishAudit, assuranceView, recordEvidence, evidenceResponse } from './assurance.mjs';
@@ -33,11 +35,13 @@ export function analyzeImpact(map, input = {}) {
   return { ...core.analyzeImpact(map, resolved), intentNote: '변경 유형은 초기 추정입니다. Codex가 실제 소스를 읽고 변경 계획을 다시 작성합니다.' };
 }
 export async function createTask(root, input, options = {}) {
+  return projectMutation(root, async () => {
   const map = await getMap(root, options), resolved = resolveSelection(map, input);
   resolved.intent = resolved.intent === 'auto' || !resolved.intent ? suggestIntent(resolved.request || '') : resolved.intent;
   const task = await core.createTask(root, resolved, options);
   await beginAudit(root, task, options);
   return decorateTask(task, root, options);
+  });
 }
 async function decorateTask(task, root, options) {
   const config = await configAt(root), map = await getMap(root, options);
@@ -55,31 +59,47 @@ async function decorateTask(task, root, options) {
 export async function getTask(root, id, options = {}) { return decorateTask(await core.getTask(root, id, options), root, options); }
 export async function listTasks(root, options = {}) { return core.listTasks(root, options); }
 export async function proposeTask(root, id, input, options = {}) {
+  return projectMutation(root, async () => {
+  await assertNoOtherExecution(root, id, options);
   const task = await core.proposeTask(root, id, input, options);
   await auditPlan(root, task, await getMap(root, options), options);
   return decorateTask(task, root, options);
+  });
 }
 export async function reviewTask(root, id, input, options = {}) {
+  return projectMutation(root, async () => {
   if (input.decision === 'approve') await assertAuditFresh(root, await core.getTask(root,id,options), options);
   return decorateTask(await core.reviewTask(root, id, input, options), root, options);
+  });
 }
 export async function updateTask(root, id, input, options = {}) {
-  if (input.status === 'running') await assertAuditFresh(root, await core.getTask(root,id,options), options);
-  const task = await core.updateTask(root, id, input, options);
-  if (input.status === 'running') {
-    try { await checkpoint(root,task,options); }
-    catch(error) { await core.updateTask(root,id,{status:'blocked',note:'체크포인트 실패. 소스 수정 전에 원인을 확인하세요.'},options);throw error; }
-  }
-  if (input.status === 'blocked') await sealCheckpoint(root,task,options);
-  return decorateTask(task, root, options);
+  return projectMutation(root, async () => {
+    const prior = await core.getTask(root, id, options);
+    if (input.status === 'running') {
+      if (prior.status === 'completed') throw Object.assign(new Error('완료된 작업입니다.'), { code: 'TASK_COMPLETED', statusCode: 409 });
+      if (!['approved','blocked','running'].includes(prior.status) || !prior.approval) throw Object.assign(new Error('현재 계획의 사용자 승인이 필요합니다.'), { code: 'REVIEW_REQUIRED', statusCode: 409 });
+      if (prior.status === 'running') throw Object.assign(new Error('이미 실행 중인 작업입니다. 별도 실행을 시작하지 마세요.'), { code: 'ALREADY_RUNNING', statusCode: 409 });
+      await assertAuditFresh(root, prior, options);
+      const others = (await core.listTasks(root, options)).filter(t => t.id !== id && ['running', 'finalizing', 'finalization_failed'].includes(t.status));
+      if (others.length) throw Object.assign(new Error('다른 작업이 실행 또는 결과 정리 중입니다.'), { code: 'PROJECT_IN_USE', statusCode: 409 });
+      const claimed = await claimExecution(root, id, options);
+      try {
+        // Do not publish running until the backup is safely written.
+        if (prior.plan) await checkpoint(root, prior, options);
+        const task = await core.updateTask(root, id, input, options);
+        return decorateTask(task, root, options);
+      } catch (error) { if (claimed) await releaseExecution(root, id, options); throw error; }
+    }
+    const task = await core.updateTask(root, id, input, options);
+    if (input.status === 'blocked') {
+      await sealCheckpoint(root, task, options);
+      await releaseExecution(root, id, options);
+    }
+    return decorateTask(task, root, options);
+  });
 }
-export async function completeTask(root, id, input, options = {}) {
-  const existing = await core.getTask(root,id,options);
-  if(existing.status === 'completed') return decorateTask(existing,root,options);
-  const task = await core.completeTask(root, id, input, options);
-  await finishAudit(root,task,options);
-  await sealCheckpoint(root,task,options);
-  return decorateTask(task, root, options);
+export async function completeTask(root, id, input = {}, options = {}) {
+  return projectMutation(root, async () => decorateTask(await finalize(root, id, input, options), root, options));
 }
 
 export async function workspaceRoute(root, route, input, options = {}) {

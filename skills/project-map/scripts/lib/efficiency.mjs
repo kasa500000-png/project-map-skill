@@ -24,6 +24,9 @@ export function compareScopes(left,right,map){
  if(!left.plan||!right.plan)return {status:'unknown',reasons:['두 작업의 구체적인 계획이 모두 필요합니다.'],sharedReads:[]};
  const a=left.experience?.assurance?.impact||left.impact,b=right.experience?.assurance?.impact||right.impact;
  const aw=new Set(left.plan.writeFiles),bw=new Set(right.plan.writeFiles),ar=new Set(a.readFiles),br=new Set(b.readFiles);
+ const adjacency=new Map();for(const edge of map.edges||[]){if(edge.kind==='navigates')continue;if(!adjacency.has(edge.source))adjacency.set(edge.source,[]);adjacency.get(edge.source).push(edge.target);}
+ const expand=(writes,reads)=>{const seen=new Set([...writes,...reads]),queue=[...seen];while(queue.length){for(const p of adjacency.get(queue.shift())||[]){if(!writes.has(p))reads.add(p);if(!seen.has(p)){seen.add(p);queue.push(p);}}}};
+ expand(aw,ar);expand(bw,br);
  const overlap=[...aw].filter(p=>bw.has(p)),dependencies=[...new Set([...aw].filter(p=>br.has(p)).concat([...bw].filter(p=>ar.has(p))))];
  const reasons=[];if(overlap.length)reasons.push('같은 파일 수정: '+overlap.join(', '));if(dependencies.length)reasons.push('한 작업이 다른 작업의 참고 코드를 변경: '+dependencies.join(', '));
  const resources=files=>new Set(map.files.filter(f=>files.has(f.path)).flatMap(f=>(f.resources||[]).map(r=>`${r.type}:${r.key}`)));

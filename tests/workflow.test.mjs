@@ -176,7 +176,7 @@ test('only checks explicitly linked to a planned node determine its outcome', as
   const task = await running(root, plan([HOME, CARD]));
   await assert.rejects(() => completeTask(root, task.id, { checks: [{ name: 'unplanned check', status: 'passed', nodeId: SETTINGS }] }), code('INVALID_INPUT'));
   const done = await completeTask(root, task.id, { checks: [{ name: 'build', status: 'passed' }, { name: 'home preview', status: 'passed', nodeId: HOME }, { name: 'card keyboard test', status: 'failed', nodeId: CARD, detail: '버튼 초점을 받지 못했습니다.' }] });
-  assert.equal(done.result.outcomes.find(outcome => outcome.nodeId === HOME).status, 'passed');
+  assert.equal(done.result.outcomes.find(outcome => outcome.nodeId === HOME).status, 'not_run');
   assert.equal(done.result.outcomes.find(outcome => outcome.nodeId === CARD).status, 'failed');
   assert.equal(done.verificationStatus, 'failed');
   assert.equal(done.result.changes.length, 0, 'a recorded check need not imply a file modification');
@@ -271,9 +271,10 @@ test('legacy queued work requires review while already running and completed rec
   await assert.rejects(() => updateTask(root, waiting.id, { status: 'running' }), code('REVIEW_REQUIRED'));
   const upgraded = await approve(root, waiting);
   assert.equal(upgraded.reviewRequired, true);
-  assert.equal((await updateTask(root, waiting.id, { status: 'running' })).status, 'running');
+  await assert.rejects(() => updateTask(root, waiting.id, { status: 'running' }), code('PROJECT_IN_USE'));
   const completed = await completeTask(root, active.id, { summary: '기존 실행 중인 작업을 마감합니다.' });
   assert.equal(completed.status, 'completed');
+  assert.equal((await updateTask(root, waiting.id, { status: 'running' })).status, 'running');
   assert.equal(completed.result.outcomes, undefined);
   assert.ok(completed.result.warnings.some(warning => /legacy task/.test(warning)));
   const { file, value } = await stored(root, completed);
@@ -331,7 +332,7 @@ test('an already satisfied request can use a verification-only plan without inve
   const done = await completeTask(root, task.id, { summary: '기존 표시를 확인했습니다.', checks: [{ name: '기존 화면 확인', status: 'passed', nodeId: HOME }] });
   assert.deepEqual(done.result.changes, []);
   assert.deepEqual(done.result.outOfScopeFiles, []);
-  assert.equal(done.result.outcomes[0].status, 'passed');
+  assert.equal(done.result.outcomes[0].status, 'not_run');
   assert.equal(done.result.afterSnapshotId, map.snapshotId);
   assert.equal((await getTask(root, task.id)).status, 'completed');
 });

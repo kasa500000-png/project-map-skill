@@ -199,7 +199,7 @@ test('verification reflects recorded outcomes and cannot be forged through a sta
   const root = await fixture(t);
   const outcomes = [
     { checks: [], expected: 'not_run' },
-    { checks: [{ name: 'actual check', status: 'passed' }], expected: 'passed' },
+    { checks: [{ name: 'actual check', status: 'passed' }], expected: 'not_run' }, // AI report alone is not execution proof.
     { checks: [{ name: 'actual check', status: 'failed' }], expected: 'failed' },
     { checks: [{ name: 'one check', status: 'passed' }, { name: 'another check', status: 'not_run' }], expected: 'not_run' },
   ];

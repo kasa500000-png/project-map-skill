@@ -528,7 +528,7 @@ function validReview(review) {
 
 function validateStoredTask(task, id, root, state) {
   const invalid = () => { throw failure('Task contains invalid project metadata, plan, approval, or paths. Create a fresh task from the current map.', 'INVALID_STATE'); };
-  if (!plainObject(task) || task.schemaVersion !== SCHEMA_VERSION || task.id !== id || task.projectRoot !== root || !Array.isArray(task.baseline) || task.baseline.length > MAX_FILES || !['queued', 'awaiting_review', 'approved', 'running', 'blocked', 'completed'].includes(task.status) || !INTENTS.has(task.intent) || typeof task.request !== 'string' || !task.request.trim() || task.request.length > 6000 || typeof task.snapshotId !== 'string' || !/^[0-9a-f]{32}$/.test(task.snapshotId) || !Number.isFinite(Date.parse(task.createdAt)) || !Number.isFinite(Date.parse(task.updatedAt))) invalid();
+  if (!plainObject(task) || task.schemaVersion !== SCHEMA_VERSION || task.id !== id || task.projectRoot !== root || !Array.isArray(task.baseline) || task.baseline.length > MAX_FILES || !['queued', 'awaiting_review', 'approved', 'running', 'blocked', 'finalizing', 'finalization_failed', 'completed'].includes(task.status) || !INTENTS.has(task.intent) || typeof task.request !== 'string' || !task.request.trim() || task.request.length > 6000 || typeof task.snapshotId !== 'string' || !/^[0-9a-f]{32}$/.test(task.snapshotId) || !Number.isFinite(Date.parse(task.createdAt)) || !Number.isFinite(Date.parse(task.updatedAt))) invalid();
   if (task.reviewRequired !== undefined && task.reviewRequired !== true) invalid();
   if (task.parentTaskId !== undefined) { try { validTaskId(task.parentTaskId); } catch { invalid(); } if (task.parentTaskId === id) invalid(); }
   if (task.startedAt !== undefined && !Number.isFinite(Date.parse(task.startedAt))) invalid();
@@ -554,7 +554,7 @@ function validateStoredTask(task, id, root, state) {
   if (task.status === 'awaiting_review' && (!task.plan || task.approval != null)) invalid();
   if (task.status === 'approved' && !approvalMatches(task)) invalid();
   if (task.status === 'queued' && task.approval != null) invalid();
-  if (task.reviewRequired && ['running', 'completed'].includes(task.status) && !approvalMatches(task)) invalid();
+  if (task.reviewRequired && ['running', 'finalizing', 'finalization_failed', 'completed'].includes(task.status) && !approvalMatches(task)) invalid();
   const effectIds = new Set(task.plan?.effects.map(effect => effect.nodeId) ?? []);
   try { normalizeChecks(task.checks, effectIds); } catch { invalid(); }
   if (task.result !== undefined) {
@@ -840,7 +840,7 @@ function normalizeChecks(checks, effectIds = new Set()) {
   return checks.map(check => {
     if (!plainObject(check) || typeof check.name !== 'string' || !check.name.trim() || !['passed', 'failed', 'not_run'].includes(check.status)) throw failure('Each check needs a name and status: passed, failed, or not_run.');
     if (check.nodeId !== undefined && (typeof check.nodeId !== 'string' || !effectIds.has(check.nodeId))) throw failure('A linked check must reference a nodeId from this plan\'s effects.');
-    return { name: cleanText(check.name, 200), status: check.status, ...(typeof check.detail === 'string' ? { detail: cleanText(check.detail, 1000) } : {}), ...(check.nodeId ? { nodeId: check.nodeId } : {}) };
+    return { name: cleanText(check.name, 200), status: check.status, ...(typeof check.detail === 'string' ? { detail: cleanText(check.detail, 1000) } : {}), ...(check.nodeId ? { nodeId: check.nodeId } : {}), ...(check.source && ['tool', 'agent', 'user'].includes(check.source) ? { source: check.source } : {}), ...(typeof check.evidenceId === 'string' ? { evidenceId: cleanText(check.evidenceId, 100) } : {}) };
   });
 }
 
@@ -853,7 +853,7 @@ export async function completeTask(projectRoot, id, input = {}, options = {}) {
   if (input.summary !== undefined && (typeof input.summary !== 'string' || input.summary.length > 6000)) throw failure('Summary must be at most 6000 characters.');
   const root = await projectPath(projectRoot), task = await getTask(root, id, options);
   if (task.status === 'completed') return task;
-  if (task.status !== 'running' || (task.reviewRequired && !approvalMatches(task))) throw failure('Only a running task may be completed. Prepare, review, and start the plan first.', 'REVIEW_REQUIRED', 409);
+  if (!['running', 'finalizing', 'finalization_failed'].includes(task.status) || (task.reviewRequired && !approvalMatches(task))) throw failure('Only a running task may be completed. Prepare, review, and start the plan first.', 'REVIEW_REQUIRED', 409);
   const checks = normalizeChecks(input.checks, new Set(task.plan?.effects.map(effect => effect.nodeId) ?? []));
   const map = await scanProject(root, options), state = await ensureState(root, options.stateDir);
   const before = new Map(task.baseline.map(file => [file.path, file.hash])), after = new Map(map.files.map(file => [file.path, file.hash]));
@@ -865,11 +865,11 @@ export async function completeTask(projectRoot, id, input = {}, options = {}) {
     changes.push({ path: filePath, status, type: status, beforeHash: before.get(filePath) ?? null, afterHash: after.get(filePath) ?? null, outOfScope: !planned.has(filePath) });
   }
   const changedPaths = new Set(changes.map(change => change.path)), changeStatuses = new Map(changes.map(change => [change.path, change.status]));
-  const verificationStatus = verificationFor(checks);
   const outcomes = (task.plan?.effects ?? []).map(effect => {
     const linked = checks.filter(check => check.nodeId === effect.nodeId);
     return { ...effect, status: verificationFor(linked), checks: linked };
   });
+  const verificationStatus = verificationFor([...checks, ...outcomes.map(outcome => ({ status: outcome.status }))]);
   const focus = [...(task.plan?.effects.map(effect => effect.nodeId) ?? []), ...task.nodeIds, ...changedPaths, ...(task.plan?.flowChanges.flatMap(change => [change.source, change.target]) ?? [])];
   const comparisonIncomplete = !task.baselineCoverage || task.baselineCoverage.truncated || task.baselineCoverage.skippedFiles > 0 || map.coverage?.truncated || map.coverage?.skippedFiles > 0;
   const beforeGraph = focusedGraph(task.baselineNodes, task.baselineEdges ?? [], focus, { changes: changeStatuses });
@@ -877,6 +877,30 @@ export async function completeTask(projectRoot, id, input = {}, options = {}) {
   const result = { summary: input.summary?.trim() ?? '', checks, verificationStatus, changes, outOfScopeFiles: changes.filter(change => change.outOfScope).map(change => change.path), beforeNodes: task.baselineNodes.filter(node => node.files.some(file => changedPaths.has(file))), afterNodes: map.nodes.filter(node => node.files.some(file => changedPaths.has(file))), beforeGraph, afterGraph, ...(task.plan ? { outcomes } : {}), beforeSnapshotId: task.snapshotId, afterSnapshotId: map.snapshotId, comparisonCoverage: { sourceFilesOnly: true, completeWithinScannedSources: !comparisonIncomplete, before: task.baselineCoverage ?? null, after: map.coverage }, warnings: ['Changes are differences since task creation, not proof that this task caused every change. Concurrent edits require review.', 'File changes and inferred flow edges do not prove that the expected behavior works. Only explicitly linked recorded checks affect each node outcome.', 'This comparison covers scanned source files only. Ignored files, unsupported formats, dependencies, and secrets are outside the comparison.', ...(task.baselineEdges === undefined ? ['This legacy task did not record its original relationships; the before graph cannot reconstruct them.'] : []), ...(beforeGraph.truncated || afterGraph.truncated ? ['The focused result graph is bounded; inspect the full file change list for changes outside the displayed nodes.'] : []), ...(comparisonIncomplete ? ['Coverage is incomplete; a missing file may have been skipped rather than deleted. Review additions, deletions, and out-of-scope findings against Git before relying on them.'] : [])] };
   const now = new Date().toISOString();
   const next = { ...task, status: 'completed', updatedAt: now, completedAt: now, checks, verificationStatus, result };
+  if (options.prepareOnly) return next;
+  await atomicJSON(path.join(state, 'tasks', id + '.json'), next);
+  return next;
+}
+
+
+// Host-only finalization primitives. Normal status updates cannot forge completion.
+export async function markFinalization(projectRoot, id, status, message = '', options = {}) {
+  if (!['finalizing', 'finalization_failed'].includes(status)) throw failure('Invalid finalization status.');
+  const root = await projectPath(projectRoot), state = await ensureState(root, options.stateDir);
+  const task = await getTask(root, id, options);
+  if (!['running', 'finalizing', 'finalization_failed'].includes(task.status)) throw failure('Only started work may be finalized.', 'INVALID_TRANSITION', 409);
+  const next = { ...task, status, finalization: { status, message: cleanText(message, 1000), at: new Date().toISOString() }, updatedAt: new Date().toISOString() };
+  await atomicJSON(path.join(state, 'tasks', id + '.json'), next);
+  return next;
+}
+
+export async function publishCompletion(projectRoot, id, candidate, options = {}) {
+  const root = await projectPath(projectRoot), state = await ensureState(root, options.stateDir);
+  const current = await getTask(root, id, options);
+  if (!['finalizing', 'finalization_failed'].includes(current.status) || current.plan?.revision !== candidate.plan?.revision || current.approval?.planHash !== candidate.approval?.planHash)
+    throw failure('Finalization context changed. Retry using the current task.', 'STALE_FINALIZATION', 409);
+  const next = { ...candidate, finalization: { status: 'complete', at: new Date().toISOString() } };
+  validateStoredTask(next, id, root, state);
   await atomicJSON(path.join(state, 'tasks', id + '.json'), next);
   return next;
 }

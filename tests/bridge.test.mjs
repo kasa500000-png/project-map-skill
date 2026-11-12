@@ -4,7 +4,7 @@ const mock=`import readline from 'node:readline';import fs from 'node:fs';
 const mode=process.env.PM_TEST_MODE;let turn,thread='test-thread',phase;
 function send(x){process.stdout.write(JSON.stringify(x)+'\\n');}
 function finish(status='completed'){
- const result=phase==='plan'?{summary:'Read-only plan',writeFiles:['app/page.tsx'],effects:[{nodeId:'app/page.tsx',change:'Title',expected:'Visible title',verify:'Inspect'}],newNodes:[],removeNodeIds:[],flowChanges:[]}:{summary:'Finished',checks:[{name:'App behavior',status:'not_run',detail:'Not checked',nodeId:''}]};
+ const result=phase==='plan'?{summary:'Read-only plan',writeFiles:['app/page.tsx'],effects:[{nodeId:'app/page.tsx',change:'Title',expected:'Visible title',verify:'Inspect'}],newNodes:[],removeNodeIds:[],flowChanges:[]}:{outcome:'implemented',summary:'Finished',checks:[{name:'App behavior',status:'not_run',detail:'Not checked',nodeId:''}]};
  send({method:'item/completed',params:{threadId:thread,turnId:turn,item:{type:'agentMessage',phase:'final_answer',text:JSON.stringify(result)}}});send({method:'turn/completed',params:{threadId:thread,turn:{id:turn,status}}});}
 readline.createInterface({input:process.stdin}).on('line',line=>{const x=JSON.parse(line);fs.appendFileSync(process.env.PM_TEST_LOG,JSON.stringify(x)+'\\n');
  if(x.method==='initialize')send({id:x.id,result:{userAgent:'test'}});

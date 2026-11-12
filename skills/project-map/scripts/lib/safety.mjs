@@ -7,7 +7,7 @@ import { auditable, isSensitive } from './inventory.mjs';
 const location=id=>`checkpoints/${taskId(id)}.json`;
 async function current(root,p){
   if(!auditable(p)||isSensitive(p))throw problem('복원 대상은 안전한 프로젝트 파일이어야 합니다.');
-  try{const full=await safePath(root,p),stat=await fs.stat(full);if(!stat.isFile()||stat.size>2*1024*1024)throw problem('체크포인트 파일은 2MB 이하의 일반 파일이어야 합니다.');
+  try{const full=await safePath(root,p),stat=await fs.stat(full);if(!stat.isFile()||stat.size>20*1024*1024)throw problem('체크포인트 파일은 20MB 이하의 일반 파일이어야 합니다.');
     const bytes=await fs.readFile(full);return {hash:hash(bytes),mode:stat.mode&0o777,bytes};
   }catch(e){if(e.code==='ENOENT')return {hash:null,mode:null,bytes:null};throw e;}
 }
