@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { detectNavigation, normalizeRoute } from './flow.mjs';
+import { inventory, auditable, isSensitive } from './inventory.mjs';
 
 const exec = promisify(execFile);
 const SCHEMA_VERSION = 1;
@@ -459,12 +460,23 @@ export async function scanProject(projectRoot, options = {}) {
   return map;
 }
 
+const ARTIFACT_EXTENSIONS = new Set(['.json','.jsonl','.csv','.yaml','.yml','.xml','.plist','.png','.jpg','.jpeg','.webp','.svg','.ico','.avif','.gif','.txt','.md','.lock','.toml','.gradle']);
+function allowedPlanFile(value, root, state) {
+  if (allowedFile(value, root, state)) return true;
+  return auditable(value) && !isSensitive(value) && inside(root, path.resolve(root,value)) && !inside(state,path.resolve(root,value)) &&
+    (ARTIFACT_EXTENSIONS.has(path.extname(value).toLowerCase()) || path.basename(value)==='.gitignore');
+}
+function validPlanPaths(values, root, state, known, maximum = MAX_FILES) {
+  return Array.isArray(values) && values.length <= maximum && new Set(values).size === values.length &&
+    values.every(value => allowedPlanFile(value, root, state) && (!known || known.has(value)));
+}
+
 function validStatePaths(values, root, state, known, maximum = MAX_FILES) {
   return Array.isArray(values) && values.length <= maximum && new Set(values).size === values.length && values.every(value => allowedFile(value, root, state) && (!known || known.has(value)));
 }
 
-function validStateNodes(nodes, root, state, known) {
-  return Array.isArray(nodes) && nodes.length <= MAX_FILES && new Set(nodes.map(node => node?.id)).size === nodes.length && nodes.every(node => plainObject(node) && allowedFile(node.id, root, state) && (!known || known.has(node.id)) && Array.isArray(node.files) && node.files.length === 1 && node.files[0] === node.id && typeof node.label === 'string' && node.label.length <= 160 && KINDS.has(node.kind) && ['confirmed', 'inferred'].includes(node.confidence));
+function validStateNodes(nodes, root, state, known, planNodes = false) {
+  return Array.isArray(nodes) && nodes.length <= MAX_FILES && new Set(nodes.map(node => node?.id)).size === nodes.length && nodes.every(node => plainObject(node) && (planNodes ? allowedPlanFile(node.id, root, state) : allowedFile(node.id, root, state)) && (!known || known.has(node.id)) && Array.isArray(node.files) && node.files.length === 1 && node.files[0] === node.id && typeof node.label === 'string' && node.label.length <= 160 && KINDS.has(node.kind) && ['confirmed', 'inferred'].includes(node.confidence));
 }
 
 function validateStoredMap(map, root, state) {
@@ -491,13 +503,13 @@ function validEdges(edges, known, maximum = MAX_FILES * 150) {
 }
 
 function validGraph(graph, root, state) {
-  if (!plainObject(graph) || !Array.isArray(graph.nodes) || graph.nodes.length > MAX_GRAPH_NODES || !validStateNodes(graph.nodes, root, state) || typeof graph.truncated !== 'boolean') return false;
+  if (!plainObject(graph) || !Array.isArray(graph.nodes) || graph.nodes.length > MAX_GRAPH_NODES || !validStateNodes(graph.nodes, root, state, undefined, true) || typeof graph.truncated !== 'boolean') return false;
   const known = new Set(graph.nodes.map(node => node.id));
   return validEdges(graph.edges, known, MAX_GRAPH_EDGES) && graph.nodes.every(node => (node.planned === undefined || typeof node.planned === 'boolean') && (node.changeStatus === undefined || ['added', 'modified', 'deleted'].includes(node.changeStatus)) && (node.action === undefined || (node.action === 'remove' && node.planned === true)));
 }
 
 function validEffect(effect, root, state, known) {
-  return plainObject(effect) && allowedFile(effect.nodeId, root, state) && known.has(effect.nodeId) && boundedText(effect.change, 1200) && boundedText(effect.expected, 2000) && boundedText(effect.verify, 2000);
+  return plainObject(effect) && allowedPlanFile(effect.nodeId, root, state) && known.has(effect.nodeId) && boundedText(effect.change, 1200) && boundedText(effect.expected, 2000) && boundedText(effect.verify, 2000);
 }
 
 function validFlowChange(change, known) {
@@ -505,15 +517,17 @@ function validFlowChange(change, known) {
 }
 
 function validatePlan(plan, root, state, baseline) {
-  if (!plainObject(plan) || !Number.isSafeInteger(plan.revision) || plan.revision < 1 || plan.revision > 100000 || !/^[0-9a-f]{32}$/.test(plan.snapshotId ?? '') || !Number.isFinite(Date.parse(plan.createdAt)) || !boundedText(plan.summary, 4000) || !validStatePaths(plan.writeFiles, root, state, undefined, MAX_PLAN_ITEMS) || !validGraph(plan.beforeGraph, root, state) || !validGraph(plan.afterGraph, root, state) || !Array.isArray(plan.newNodes) || plan.newNodes.length > MAX_PLAN_ITEMS || !validStateNodes(plan.newNodes, root, state)) return false;
-  const known = new Set([...baseline, ...plan.beforeGraph.nodes.map(node => node.id), ...plan.afterGraph.nodes.map(node => node.id), ...plan.newNodes.map(node => node.id)]);
+  if (!plainObject(plan) || !Number.isSafeInteger(plan.revision) || plan.revision < 1 || plan.revision > 100000 || !/^[0-9a-f]{32}$/.test(plan.snapshotId ?? '') || !Number.isFinite(Date.parse(plan.createdAt)) || !boundedText(plan.summary, 4000) || !validPlanPaths(plan.writeFiles, root, state, undefined, MAX_PLAN_ITEMS) || !validGraph(plan.beforeGraph, root, state) || !validGraph(plan.afterGraph, root, state) || !Array.isArray(plan.newNodes) || plan.newNodes.length > MAX_PLAN_ITEMS || !validStateNodes(plan.newNodes, root, state, undefined, true)) return false;
+  if (plan.artifactNodes !== undefined && !validStateNodes(plan.artifactNodes, root, state, undefined, true)) return false;
+  const known = new Set([...baseline, ...(plan.artifactNodes || []).map(n => n.id), ...plan.beforeGraph.nodes.map(node => node.id), ...plan.afterGraph.nodes.map(node => node.id), ...plan.newNodes.map(node => node.id)]);
   if (!Array.isArray(plan.effects) || !plan.effects.length || plan.effects.length > MAX_PLAN_ITEMS || new Set(plan.effects.map(effect => effect?.nodeId)).size !== plan.effects.length || !plan.effects.every(effect => validEffect(effect, root, state, known))) return false;
   const effects = new Set(plan.effects.map(effect => effect.nodeId)), before = new Set(plan.beforeGraph.nodes.map(node => node.id)), after = new Set(plan.afterGraph.nodes.map(node => node.id));
   const removed = plan.removeNodeIds ?? [], alreadyRemoved = plan.alreadyRemovedNodeIds ?? [];
-  if (!validStatePaths(alreadyRemoved, root, state, baseline, MAX_PLAN_ITEMS) || alreadyRemoved.some(id => !removed.includes(id) || before.has(id) || after.has(id))) return false;
+  if (!validPlanPaths(alreadyRemoved, root, state, new Set([...baseline,...(plan.artifactNodes||[]).map(n=>n.id)]), MAX_PLAN_ITEMS) || alreadyRemoved.some(id => !removed.includes(id) || before.has(id) || after.has(id))) return false;
   const removable = new Set([...before, ...alreadyRemoved]);
-  if (!validStatePaths(removed, root, state, removable, MAX_PLAN_ITEMS) || removed.some(id => !plan.writeFiles.includes(id) || !effects.has(id) || after.has(id) || plan.newNodes.some(node => node.id === id))) return false;
+  if (!validPlanPaths(removed, root, state, removable, MAX_PLAN_ITEMS) || removed.some(id => !plan.writeFiles.includes(id) || !effects.has(id) || after.has(id) || plan.newNodes.some(node => node.id === id))) return false;
   if (plan.writeFiles.some(file => !effects.has(file)) || plan.effects.some(effect => !after.has(effect.nodeId) && !removed.includes(effect.nodeId)) || plan.newNodes.some(node => !plan.writeFiles.includes(node.id) || !after.has(node.id))) return false;
+  if (plan.assetBindings !== undefined && (!plainObject(plan.assetBindings) || Object.entries(plan.assetBindings).some(([file, owner]) => !plan.writeFiles.includes(file) || !known.has(owner) || file===owner))) return false;
   return Array.isArray(plan.flowChanges) && plan.flowChanges.length <= MAX_PLAN_ITEMS && plan.flowChanges.every(change => validFlowChange(change, known)) && new Set(plan.flowChanges.map(change => [change.source, change.target, change.kind].join('\0'))).size === plan.flowChanges.length;
 }
 
@@ -655,7 +669,7 @@ function validTaskId(id) {
 }
 
 async function safeWriteTarget(root, state, relativePath, code = 'INVALID_INPUT') {
-  if (!allowedFile(relativePath, root, state)) throw failure('Plan files must be supported source paths inside this project, outside secrets, generated files, and state storage.', code);
+  if (!allowedPlanFile(relativePath, root, state)) throw failure('Plan files must be supported source or artifact paths inside this project, outside secrets, generated files, and state storage.', code);
   let current = root;
   const parts = relativePath.split('/');
   for (let index = 0; index < parts.length; index++) {
@@ -668,7 +682,7 @@ async function safeWriteTarget(root, state, relativePath, code = 'INVALID_INPUT'
 }
 
 function graphNode(node, options = {}) {
-  return { id: node.id, label: node.label, kind: node.kind, files: [...node.files], confidence: node.confidence ?? 'inferred', ...(node.route ? { route: node.route } : {}), ...(options.planned ? { planned: true } : {}), ...(options.action ? { action: options.action } : {}), ...(options.changeStatus ? { changeStatus: options.changeStatus } : {}) };
+  return { id: node.id, label: node.label, kind: node.kind, files: [...node.files], confidence: node.confidence ?? 'inferred', ...(node.artifact ? { artifact: true } : {}), ...(node.route ? { route: node.route } : {}), ...(options.planned ? { planned: true } : {}), ...(options.action ? { action: options.action } : {}), ...(options.changeStatus ? { changeStatus: options.changeStatus } : {}) };
 }
 
 function focusedGraph(nodes, edges, seeds, options = {}) {
@@ -730,22 +744,38 @@ export async function listTasks(projectRoot, options = {}) {
 }
 
 export async function proposeTask(projectRoot, id, input, options = {}) {
-  if (!plainObject(input) || Object.keys(input).some(key => !['summary', 'writeFiles', 'effects', 'newNodes', 'removeNodeIds', 'flowChanges'].includes(key))) throw failure('Plan input may contain summary, writeFiles, effects, newNodes, removeNodeIds, and flowChanges only.');
+  if (!plainObject(input) || Object.keys(input).some(key => !['summary', 'writeFiles', 'effects', 'newNodes', 'removeNodeIds', 'flowChanges', 'assetBindings'].includes(key))) throw failure('Plan input may contain summary, writeFiles, effects, newNodes, removeNodeIds, and flowChanges only.');
   if (!boundedText(input.summary, 4000)) throw failure('A plan needs a clear summary of at most 4000 characters.');
   const root = await projectPath(projectRoot), state = await ensureState(root, options.stateDir), task = await getTask(root, id, options);
   if (task.status === 'completed') throw failure('A completed task cannot be replanned. Create a follow-up request.', 'TASK_COMPLETED', 409);
   const map = await scanProject(root, options);
   if (!task.plan && !task.startedAt && task.status !== 'blocked' && map.snapshotId !== task.snapshotId) throw failure('The project changed before its first plan. Create a fresh request from the current map.', 'STALE_SNAPSHOT', 409);
-  if (!validStatePaths(input.writeFiles, root, state, undefined, MAX_PLAN_ITEMS)) throw failure('writeFiles must contain at most 60 unique supported source paths; use an empty array for verification-only work.');
+  if (!validPlanPaths(input.writeFiles, root, state, undefined, MAX_PLAN_ITEMS)) throw failure('writeFiles must contain at most 60 unique safe source/artifact paths; use an empty array for verification-only work.');
   const current = new Map(map.nodes.map(node => [node.id, node])), baseline = new Map(task.baselineNodes.map(node => [node.id, node]));
+  for (const node of task.plan?.artifactNodes || []) baseline.set(node.id,node);
+  const artifactNodes = new Map((task.plan?.artifactNodes || []).map(node=>[node.id,node]));
+  const broad = await inventory(root, options), broadFiles = new Map(broad.files.map(file=>[file.path,file]));
+  for (const file of input.writeFiles) {
+    if (current.has(file) || allowedFile(file,root,state)) continue;
+    const record = broadFiles.get(file);
+    if (record && !record.sensitive) {
+      const node = { id:file, label:path.basename(file), kind:/\.(jsonl?|csv|txt|md)$/i.test(file)?'data':'config', files:[file], confidence:'inferred', artifact:true };
+      current.set(file,node); artifactNodes.set(file,node); map.nodes.push(node);
+    }
+  }
   const newNodes = [];
   if (input.newNodes !== undefined && (!Array.isArray(input.newNodes) || input.newNodes.length > MAX_PLAN_ITEMS)) throw failure('newNodes must contain at most 60 planned source nodes.');
   for (const node of input.newNodes ?? []) {
-    if (!plainObject(node) || !allowedFile(node.id, root, state) || current.has(node.id) || baseline.has(node.id) || newNodes.some(existing => existing.id === node.id) || !input.writeFiles.includes(node.id) || !boundedText(node.label, 120) || !KINDS.has(node.kind)) throw failure('Each new node needs a unique planned source path in writeFiles, a label, and a supported kind.');
+    if (!plainObject(node) || !allowedPlanFile(node.id, root, state) || current.has(node.id) || baseline.has(node.id) || newNodes.some(existing => existing.id === node.id) || !input.writeFiles.includes(node.id) || !boundedText(node.label, 120) || !KINDS.has(node.kind)) throw failure('Each new node needs a unique planned source path in writeFiles, a label, and a supported kind.');
     const route = inferRoute(node.id, node.kind);
-    newNodes.push({ id: node.id, label: node.label.trim(), kind: node.kind, files: [node.id], confidence: 'inferred', planned: true, ...(route ? { route } : {}) });
+    newNodes.push({ id: node.id, label: node.label.trim(), kind: node.kind, files: [node.id], confidence: 'inferred', planned: true, ...(!allowedFile(node.id,root,state) ? {artifact:true} : {}), ...(route ? { route } : {}) });
   }
   const known = new Map([...baseline, ...current, ...newNodes.map(node => [node.id, node])]);
+  for (const node of newNodes.filter(n=>n.artifact)) artifactNodes.set(node.id,node);
+  const assetBindings = input.assetBindings ?? {};
+  if (!plainObject(assetBindings) || Object.entries(assetBindings).some(([file,owner])=>!input.writeFiles.includes(file)||!artifactNodes.has(file)||!current.has(owner)||current.get(owner).artifact||file===owner)) throw failure('assetBindings must link planned artifacts to existing source feature nodes.');
+  for (const [file,owner] of Object.entries(assetBindings)) if(current.has(file)) map.edges.push({id:digest(owner+'\0'+file+'\0artifact').slice(0,20),source:owner,target:file,kind:'uses',confidence:'inferred',evidence:'Declared artifact membership; not a runtime-verified dependency.'});
+
   for (const file of input.writeFiles) {
     await safeWriteTarget(root, state, file);
     if (!known.has(file)) throw failure('Every new write file needs a matching newNodes entry.');
@@ -768,7 +798,7 @@ export async function proposeTask(projectRoot, id, input, options = {}) {
     ...(task.plan?.alreadyRemovedNodeIds ?? []),
   ] : []);
   const removable = new Set([...current.keys(), ...[...priorRemovals].filter(nodeId => baseline.has(nodeId))]);
-  if (!validStatePaths(removeNodeIds, root, state, removable, MAX_PLAN_ITEMS) || removeNodeIds.some(nodeId => !input.writeFiles.includes(nodeId) || !effects.some(effect => effect.nodeId === nodeId) || newNodes.some(node => node.id === nodeId))) throw failure('removeNodeIds must name current nodes or already reviewed deletions in this running task, included in writeFiles and effects.');
+  if (!validPlanPaths(removeNodeIds, root, state, removable, MAX_PLAN_ITEMS) || removeNodeIds.some(nodeId => !input.writeFiles.includes(nodeId) || !effects.some(effect => effect.nodeId === nodeId) || newNodes.some(node => node.id === nodeId))) throw failure('removeNodeIds must name current nodes or already reviewed deletions in this running task, included in writeFiles and effects.');
   const removedNodes = new Set(removeNodeIds), alreadyRemovedNodeIds = removeNodeIds.filter(nodeId => !current.has(nodeId));
   for (const nodeId of alreadyRemovedNodeIds) {
     try { await fs.lstat(path.join(root, nodeId)); }
@@ -788,11 +818,12 @@ export async function proposeTask(projectRoot, id, input, options = {}) {
     if (afterEdges.some(edge => edgeKey(edge) === edgeKey(change))) continue;
     afterEdges.push({ id: digest(edgeKey(change) + '\0planned').slice(0, 20), source: change.source, target: change.target, kind: change.kind, confidence: 'inferred', evidence: 'Planned relationship: ' + change.reason, planned: true, action: 'add' });
   }
+  for(const [file,owner] of Object.entries(assetBindings)) if(!current.has(file)) afterEdges.push({id:digest(owner+'\0'+file+'\0artifact').slice(0,20),source:owner,target:file,kind:'uses',confidence:'inferred',evidence:'Planned artifact membership; verify after implementation.',planned:true,action:'add'});
   const seeds = [...effects.map(effect => effect.nodeId), ...task.nodeIds, ...normalizedFlows.flatMap(change => [change.source, change.target])];
   const beforeEdges = map.edges.map(edge => removed.has(edgeKey(edge)) ? { ...edge, planned: true, action: 'remove' } : edge);
   const afterNodes = [...[...current.values()].filter(node => !removedNodes.has(node.id)), ...newNodes];
   const now = new Date().toISOString();
-  const plan = { revision: (task.plan?.revision ?? 0) + 1, snapshotId: map.snapshotId, summary: input.summary.trim(), writeFiles: [...input.writeFiles], effects, newNodes, removeNodeIds: [...removeNodeIds], alreadyRemovedNodeIds, flowChanges: normalizedFlows, beforeGraph: focusedGraph(map.nodes, beforeEdges, seeds, { removed: removedNodes }), afterGraph: focusedGraph(afterNodes, afterEdges, seeds, { planned: new Set(input.writeFiles) }), createdAt: now };
+  const plan = { revision: (task.plan?.revision ?? 0) + 1, snapshotId: map.snapshotId, summary: input.summary.trim(), writeFiles: [...input.writeFiles], effects, newNodes, removeNodeIds: [...removeNodeIds], alreadyRemovedNodeIds, flowChanges: normalizedFlows, assetBindings, artifactNodes:[...artifactNodes.values()], beforeGraph: focusedGraph(map.nodes, beforeEdges, seeds, { removed: removedNodes }), afterGraph: focusedGraph(afterNodes, afterEdges, seeds, { planned: new Set(input.writeFiles) }), createdAt: now };
   if (!validatePlan(plan, root, state, new Set(baseline.keys()))) throw failure('The plan exceeds the focused graph limits. Split the request into smaller plans.');
   const history = [...(task.planHistory ?? []), ...(task.plan ? [{ revision: task.plan.revision, snapshotId: task.plan.snapshotId, summary: task.plan.summary, createdAt: task.plan.createdAt }] : [])].slice(-5);
   const next = { ...task, status: 'awaiting_review', reviewRequired: true, plan, planHistory: history, approval: null, updatedAt: now };

@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import * as core from './analyzer.mjs';
 import { projectMutation, claimExecution, releaseExecution, assertNoOtherExecution } from './task-lock.mjs';
 import { finalize } from './finalize.mjs';
+import { reviewGraphs } from './graph-review.mjs';
 import { buildFeatureMap, resolveSelection, suggestIntent } from './feature-map.mjs';
 export * from './analyzer.mjs';
 import { beginAudit, auditPlan, assertAuditFresh, finishAudit, assuranceView, recordEvidence, evidenceResponse } from './assurance.mjs';
@@ -45,12 +46,12 @@ export async function createTask(root, input, options = {}) {
 }
 async function decorateTask(task, root, options) {
   const config = await configAt(root), map = await getMap(root, options);
-  const project = graph => graph ? buildFeatureMap({ ...graph, files: [] }, config) : null;
+  const assurance = await assuranceView(root, task, options);
+  const graphs = reviewGraphs(task, config, assurance);
   const decorated = { ...task, experience: {
     featureLabels: Object.fromEntries(map.nodes.map(node => [node.id, map.featureGraph.nodes.filter(f => f.entryNodeIds.includes(node.id)).map(f => f.label).join(' / ') || node.label])),
-    beforeGraph: project(task.plan?.beforeGraph), expectedGraph: project(task.plan?.afterGraph),
-    actualGraph: project(task.result?.afterGraph),
-    assurance: await assuranceView(root, task, options),
+    ...graphs,
+    assurance,
     safety: await safetyView(root, task, options)
   } };
   decorated.experience.parallel = await taskComparisons(root,decorated,map,options);
@@ -103,6 +104,8 @@ export async function completeTask(root, id, input = {}, options = {}) {
 }
 
 export async function workspaceRoute(root, route, input, options = {}) {
+  const retry = route.match(/^\/api\/tasks\/([^/]+)\/retry-finalization$/);
+  if (retry) return { value: await completeTask(root, retry[1], {}, options), status: 200 };
   if (route.startsWith('/api/codex/')) {
     if(!options.codex) throw Object.assign(new Error('직접 연결은 기본으로 꺼져 있습니다. --codex로 서버를 시작하세요.'),{statusCode:403});
     const bridge = bridgeFor(root, options); let value;

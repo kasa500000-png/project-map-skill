@@ -2,7 +2,7 @@
 (() => {
   const $ = s => document.querySelector(s);
   const node = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
-  const statusNames = { queued: 'Codex에 계획 요청 필요', awaiting_review: '사용자 계획 검토 대기', approved: '승인됨 · Codex 실행 필요', running: '작업 중', blocked: '중단 · 확인 필요', completed: '작업 완료 · 검증 결과 확인', passed: '통과', failed: '실패', not_run: '미확인' };
+  const statusNames = { queued: 'Codex에 계획 요청 필요', awaiting_review: '사용자 계획 검토 대기', approved: '승인됨 · Codex 실행 필요', running: '작업 중', blocked: '중단 · 확인 필요', finalizing: '결과 정리 중', finalization_failed: '결과 정리 실패 · 재시도 필요', completed: '수정 완료 · 검증은 별도 확인', passed: '통과', failed: '실패', not_run: '미확인' };
   let map, token, selected, impact, task, tasks = [], zoom = 1, parentTaskId;
   const notice = text => { $('#notice').textContent = text; $('#notice').hidden = !text; };
   const fail = error => { $('#error').textContent = error.message; $('#error').hidden = false; };
@@ -32,14 +32,19 @@
       const line = document.createElementNS(svg.namespaceURI, 'path'); const right = b.x > a.x;
       const x1 = a.x + (right ? 174 : 0), x2 = b.x + (right ? 0 : 174), y1 = a.y + 37, y2 = b.y + 37;
       line.setAttribute('d', `M${x1} ${y1} C${x1 + (right ? 28 : -28)} ${y1},${x2 + (right ? -28 : 28)} ${y2},${x2} ${y2}`);
-      line.setAttribute('fill', 'none'); line.setAttribute('stroke', '#8ea79a'); line.setAttribute('stroke-width', edge.source === selected?.id || edge.target === selected?.id ? '2' : '1'); line.setAttribute('marker-end', `url(#${markerId})`);
+      line.setAttribute('fill', 'none'); line.setAttribute('stroke', edge.changeStatus==='deleted'||edge.action==='remove'?'#bd6258':edge.planned?'#2c9264':'#8ea79a'); line.setAttribute('stroke-width', edge.source === selected?.id || edge.target === selected?.id ? '2' : '1'); line.setAttribute('marker-end', `url(#${markerId})`);
       if (edge.kind !== 'navigates') line.setAttribute('stroke-dasharray', '4 4'); svg.append(line);
     }
     canvas.append(svg);
     for (const item of all) {
-      const p = positions.get(item.id), b = button('', () => select?.(item), 'node'); b.dataset.id = item.id; b.dataset.kind = item.kind; b.dataset.effect = effect[item.id] || ''; b.setAttribute('aria-pressed', String(item.id === selected?.id)); b.style.left = p.x + 'px'; b.style.top = p.y + 'px';
+      const p = positions.get(item.id), b = button('', () => select?.(item), 'node'); b.dataset.id = item.id; b.dataset.kind = item.kind; b.dataset.effect = effect[item.id] || (item.removed?'deleted':item.changeStatus|| (item.planned?'planned':'')); b.dataset.unexpected=String(!!item.outOfScope); b.setAttribute('aria-pressed', String(item.id === selected?.id)); b.style.left = p.x + 'px'; b.style.top = p.y + 'px';
       b.append(node('strong', item.label), node('small', item.kind === 'shared' ? '여러 기능의 공통 부분' : `${item.files?.length || 1}개 코드 · ${item.origin === 'configured' ? '지정한 기능' : '자동 구성'}`));
-      b.title = item.description || item.label; if (!select) b.disabled = true; canvas.append(b);
+      const flags=[];
+      if(item.removed)flags.push('삭제');else if(item.changeStatus)flags.push(({added:'추가됨',modified:'수정됨',deleted:'삭제됨',unknown:'변경 확인 필요'})[item.changeStatus]||'변경');else if(item.planned)flags.push('수정 예정');
+      if(item.outOfScope)flags.push('예상 밖');
+      if(item.verificationStatus)flags.push(item.verificationStatus==='passed'?'도구 검사 통과':item.verificationStatus==='failed'?'검사 실패':'동작 미확인');
+      if(flags.length)b.append(node('span',flags.join(' · '),'change-flag'));
+      b.title = item.description || item.label; if (!select) {b.setAttribute('aria-disabled','true');b.tabIndex=-1;} canvas.append(b);
     }
     host.append(canvas);
     if (data.nodes.length > 90) host.append(node('p', '처음 90개만 표시했습니다. 기능 검색 또는 프로젝트 범위를 좁혀 확인하세요.', 'empty'));
@@ -73,7 +78,7 @@
     const previous = map.featureGraph.nodes.find(n => n.id === selected?.id); if (previous) choose(previous); else if (map.featureGraph.nodes[0]) choose(map.featureGraph.nodes[0]); else renderMap();
   }
   function promptFor(t) {
-    const direction = t.status === 'approved' ? '내가 승인한 현재 계획을 확인하고 작업을 진행해줘.' : t.status === 'completed' ? '완료된 작업의 실제 변경과 미확인 검증을 설명해줘.' : '최신 코드와 요청을 읽고 시각적인 변경 계획만 작성해줘. 내가 지도에서 승인하기 전에는 코드를 수정하지 마.';
+    const direction = t.status === 'finalization_failed' ? '결과 정리 실패 원인을 확인하고 기존 요청 결과를 보존해 complete를 재시도해줘. 코드를 임의로 다시 수정하지 마.' : t.status === 'approved' ? '내가 승인한 현재 계획을 확인하고 작업을 진행해줘.' : t.status === 'completed' ? '완료된 작업의 실제 변경과 미확인 검증을 설명해줘.' : '최신 코드와 요청을 읽고 시각적인 변경 계획만 작성해줘. 내가 지도에서 승인하기 전에는 코드를 수정하지 마.';
     return `$project-map\n프로젝트: ${map.project.root}\n요청 ID: ${t.id}\n${direction}`;
   }
   function renderTasks() {
@@ -90,7 +95,7 @@
     body.append(node('p', `요청 ID ${t.id}`, 'muted'));
     if (t.plan) {
       body.append(node('p', t.plan.summary, 'info'));
-      const compare = node('div', undefined, 'task-grid'); compare.append(mini('현재 구조 · 계획 작성 시점', t.experience.beforeGraph), mini(t.result ? '작업 후 실제 구조' : '변경 후 예상 구조 · 아직 실행 전', t.result ? t.experience.actualGraph : t.experience.expectedGraph)); body.append(compare);
+      const compare = node('div', undefined, 'task-grid'); compare.append(mini('변경 전 · 계획 작성 시점', t.experience.beforeGraph), mini('승인할 예상 / 승인했던 예상', t.experience.expectedGraph)); if(t.result)compare.append(mini('작업 후 실제 결과 · 검증 상태 별도',t.experience.actualGraph)); body.append(compare);
       for (const effect of t.result?.outcomes || t.plan.effects) {
         const card = node('article', undefined, 'effect'); card.append(badge(effect.status || 'not_run'), node('h3', t.experience.featureLabels[effect.nodeId] || effect.nodeId), node('p', '변경: ' + effect.change), node('p', '기대 결과: ' + effect.expected), node('p', '확인 방법: ' + effect.verify)); body.append(card);
       }
@@ -102,11 +107,21 @@
       const review = async decision => { task = await api(`/api/tasks/${t.id}/review`, { decision, revision: t.plan.revision, snapshotId: t.plan.snapshotId, note: feedback.value }); renderTask(); await reloadTasks(); notice(decision === 'approve' ? '계획을 승인했습니다. 현재 연결 방식에서는 Codex에 실행 요청을 전달해야 합니다.' : '수정 의견을 저장했습니다. Codex에 계획 재작성을 요청하세요.'); };
       actions.append(button('이 계획으로 진행', () => review('approve'), 'primary'), button('계획 수정 요청', () => review('revise'))); body.append(feedback, actions);
     }
+    if (t.status==='finalization_failed') {
+      body.append(node('p',t.finalization?.message||'마무리 기록에 실패했습니다. 원인을 해결한 뒤 다시 시도하세요.','info caution'),button('결과 정리 다시 시도',async()=>{await api(`/api/tasks/${t.id}/retry-finalization`,{});await openTask(t.id,false);notice('결과 기록을 다시 확인했습니다.');}));
+    }
     if (t.result) {
       body.append(node('p', '파일이 바뀌었다는 사실과 기능이 검증됐다는 사실은 다릅니다. 미확인 항목을 확인한 뒤 배포하세요.', 'info caution'));
       const d = node('details'); d.append(node('summary', `실제 소스 변경 ${t.result.changes.length}개 · 범위 밖 ${t.result.outOfScopeFiles.length}개`), node('pre', t.result.changes.map(c => `${c.status} ${c.path}${c.outOfScope ? ' [범위 밖]' : ''}`).join('\n') || '변경 없음', 'prompt')); body.append(d);
-      for (const check of t.result.checks) { const row = node('p', undefined, 'effect'); row.append(badge(check.status), node('strong', check.name), node('p', check.detail || '추가 기록 없음')); body.append(row); }
+      for (const check of t.result.checks) { const row = node('p', undefined, 'effect'); row.append(badge(check.status), node('strong', `${check.name} · ${check.source==='tool'?'실행 증거':'AI 보고'}`), node('p', check.detail || '추가 기록 없음')); body.append(row); }
       body.append(button('이 결과에서 다음 요청 시작', () => { parentTaskId = t.id; const f = map.featureGraph.nodes.find(f => f.entryNodeIds.some(id => t.nodeIds.includes(id))); if (f) choose(f); $('#request').value = ''; $('#request').focus(); notice('이전 작업과 연결된 새 요청을 작성하세요.'); }));
+    }
+    if(t.experience.comparison){
+      const cmp=t.experience.comparison,table=node('table'),head=node('tr');['파일','승인한 예상','실제 변화','확인 상태'].forEach(x=>head.append(node('th',x)));table.append(head);
+      const names={added:'추가',modified:'수정',deleted:'삭제',unchanged:'변화 없음',unknown:'추가 확인'};
+      for(const item of cmp.planned){const row=node('tr');row.append(node('td',item.file),node('td',names[item.expected]),node('td',names[item.actual]||item.actual),node('td',statusNames[item.verification]));if(!item.matches)row.className='comparison-mismatch';table.append(row);}
+      const wrap=node('div',undefined,'table-wrap');wrap.append(table);body.append(node('h3','승인한 예상과 실제 결과'),node('p',cmp.note,'footnote'),wrap);
+      if(cmp.unexpected.length)body.append(node('p',`예상 밖 변경 ${cmp.unexpected.length}개: ${cmp.unexpected.map(c=>c.path).join(', ')}`,'info caution'));
     }
     const prompt = node('pre', promptFor(t), 'prompt');
     body.append(button('Codex 요청문 복사', async () => { try { await navigator.clipboard.writeText(prompt.textContent); notice('복사했습니다. 현재 프로젝트의 Codex 대화에 붙여 넣으세요.'); } catch { notice('자동 복사가 안 되면 아래 요청문을 직접 선택해 복사하세요.'); } }), prompt);

@@ -26,3 +26,21 @@ analysis includes transitive implementation dependencies.
 Validation: 120 Node tests passed in the development environment, including the
 new failure/provenance/finalization/cross-process/disposition regressions. No live
 Codex account or production application was used.
+
+## 2. Visual comparison and planned artifacts
+
+The feature projection now preserves planned/added/modified/deleted flags,
+unexpected changes and verification state. The workbench retains all three
+snapshots: before, reviewed expectation and actual result. A separate table
+shows planned files with no observed change. This is structural/file comparison,
+not proof of runtime behavior or a pixel-perfect screen preview.
+
+Ordinary content JSON, images and configuration files may now be planned,
+approved, backed up, audited and restored. Optional `assetBindings` links a
+planned artifact path to an existing feature entry. Such membership is declared,
+not claimed as a detected runtime dependency. Source-map coverage is unchanged:
+assets are shown in the plan without turning every project file into a node.
+Ignored, secret-like, generated, state and symlink paths remain excluded.
+
+Validation: 126 Node tests pass, including content/image creation, modification,
+deletion, state/secret exclusions, restore and all-three-snapshot regressions.

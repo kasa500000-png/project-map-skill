@@ -64,29 +64,40 @@ export function buildFeatureMap(map, config = {}) {
       entryNodeIds: [id], files: [id], confidence: 'inferred', origin: 'inferred',
       description: `${owners.length}개 기능에서 함께 사용합니다. 변경 시 이 기능들을 함께 확인하세요.` });
   }
+  // Do not discard change metadata when projecting files into product features.
+  for (const item of map.nodes.filter(n=>n.artifact)) if(!membership.has(item.id)) {
+    nodes.push({id:`artifact:${item.id}`,label:item.label,kind:'artifact',entryNodeIds:[item.id],files:[item.id],origin:'declared',confidence:'inferred',description:'계획에 포함된 콘텐츠·이미지·설정 파일'});
+  }
   for (const node of nodes) {
+    const members=node.files.map(id=>source.get(id)).filter(Boolean), entries=node.entryNodeIds.map(id=>source.get(id)).filter(Boolean);
+    node.planned=members.some(n=>n.planned);
+    node.changeKinds=[...new Set(members.map(n=>n.changeStatus).filter(Boolean))];
+    if(node.changeKinds.length)node.changeStatus=node.changeKinds.length===1?node.changeKinds[0]:'modified';
+    if(entries.length&&entries.every(n=>n.action==='remove'||n.changeStatus==='deleted'))node.removed=true;
+    node.outOfScope=members.some(n=>n.outOfScope);
+    node.verificationStatus=members.some(n=>n.verificationStatus==='failed')?'failed':members.some(n=>n.verificationStatus==='not_run')?'not_run':members.some(n=>n.verificationStatus==='passed')?'passed':null;
     const custom = config.featureLabels?.[node.id];
     if (typeof custom === 'string' && custom.trim()) node.label = custom.trim().slice(0, 120);
   }
   const edges = new Map();
-  const connect = (a, b, kind, reason, evidence) => {
+  const connect = (a, b, kind, reason, evidence, flags = {}) => {
     if (a === b) return;
     const id = JSON.stringify([a, b, kind]);
     const previous = edges.get(id);
-    if (previous) { previous.evidenceCount++; return; }
-    edges.set(id, { id, source: a, target: b, kind, confidence: 'inferred', reason, evidence, evidenceCount: 1 });
+    if (previous) { previous.evidenceCount++; if(flags.planned)previous.planned=true; if(flags.action)previous.action=flags.action; return; }
+    edges.set(id, { id, source: a, target: b, kind, confidence: 'inferred', reason, evidence, evidenceCount: 1, ...(flags.planned?{planned:true}:{}), ...(flags.action?{action:flags.action}:{}), ...(flags.changeStatus?{changeStatus:flags.changeStatus}:{}) });
   };
   for (const edge of map.edges) {
     if (edge.kind === 'navigates') {
       for (const a of entryOwners.get(edge.source) || []) for (const b of entryOwners.get(edge.target) || [])
-        connect(a, b, 'navigates', '이 화면에서 다음 화면으로 이동하는 코드가 있습니다.', edge.evidence);
+        connect(a, b, 'navigates', '이 화면에서 다음 화면으로 이동하는 코드가 있습니다.', edge.evidence, edge);
     }
   }
   for (const node of nodes.filter(n => n.kind === 'shared')) for (const owner of membership.get(node.entryNodeIds[0]) || [])
     connect(owner, node.id, 'uses', '같은 구현을 사용합니다. 이 공통 부분의 변경은 연결된 기능의 검증이 필요합니다.', node.entryNodeIds[0]);
   for (const edge of map.edges.filter(e => e.kind !== 'navigates')) {
     for (const a of entryOwners.get(edge.source) || []) for (const b of entryOwners.get(edge.target) || [])
-      connect(a, b, 'uses', '다른 기능의 진입 코드를 참조합니다. 이동 관계와는 다릅니다.', edge.evidence);
+      connect(a, b, 'uses', '다른 기능의 진입 코드를 참조합니다. 이동 관계와는 다릅니다.', edge.evidence, edge);
   }
   return { nodes, edges: [...edges.values()], warnings,
     coverage: '정적 코드 기반 후보입니다. 선이 없다는 이유만으로 영향이 없다고 판단하지 마세요.' };
