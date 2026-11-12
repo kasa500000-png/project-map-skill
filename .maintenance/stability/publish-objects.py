@@ -1,44 +1,34 @@
-"""Create verified Git objects only; the authorized connector updates main later."""
-import json, os, pathlib, subprocess, sys, urllib.request
-report_path = pathlib.Path(sys.argv[1])
-report = json.loads(report_path.read_text())
+"""Upload validated source objects only. Workflow changes and refs use the user-authorized connector."""
+import json, os, pathlib, subprocess, sys, urllib.request, urllib.error
+report_path = pathlib.Path(sys.argv[1]); report = json.loads(report_path.read_text())
 repo = os.environ['GITHUB_REPOSITORY']
 assert repo == 'kasa500000-png/project-map-skill'
-def git(*args):
-    return subprocess.check_output(['git', *args])
-def post(endpoint, value):
-    req = urllib.request.Request('https://api.github.com/repos/' + repo + endpoint, data=json.dumps(value).encode(), method='POST', headers={'Authorization':'Bearer ' + os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
-    with urllib.request.urlopen(req, timeout=60) as response:
-        return json.load(response)
+def git(*args): return subprocess.check_output(['git', *args])
 def entries(ref):
     result = {}
     for entry in git('ls-tree','-rz',ref).split(b'\0'):
         if not entry: continue
-        meta, path = entry.split(b'\t',1)
-        mode, kind, sha = meta.decode().split()
-        result[path.decode()] = {'mode':mode,'type':kind,'sha':sha}
+        meta, name = entry.split(b'\t',1); mode, kind, sha = meta.decode().split()
+        result[name.decode()] = {'mode':mode,'type':kind,'sha':sha}
     return result
-local_parent = report['base']
-remote_parent = report['base']
-remote_tree = git('rev-parse', local_parent + '^{tree}').decode().strip()
-for stage in report['commits']:
-    before, after = entries(local_parent), entries(stage['sha'])
-    updates = []
-    for path in sorted(set(before) | set(after)):
-        if before.get(path) == after.get(path): continue
-        if path not in after:
-            updates.append({'path':path,'mode':before[path]['mode'],'type':before[path]['type'],'sha':None})
-        else:
-            entry = after[path]
-            assert entry['type'] == 'blob', 'Unexpected non-blob change'
-            updates.append({'path':path,'mode':entry['mode'],'type':'blob','content':git('cat-file','blob',entry['sha']).decode('utf-8')})
-    tree = post('/git/trees', {'base_tree':remote_tree,'tree':updates})
-    assert tree['sha'] == stage['tree'], 'Published tree differs from verified tree'
-    commit = post('/git/commits', {'message':stage['message'],'tree':tree['sha'],'parents':[remote_parent]})
-    stage['localSha'] = stage['sha']
-    stage['sha'] = commit['sha']
-    local_parent = stage['localSha']; remote_parent = commit['sha']; remote_tree = tree['sha']
-report['remoteHead'] = remote_parent
-report['refUpdated'] = False
-report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
-print(report_path.read_text())
+before = entries(report['commits'][1]['sha']); after = entries(report['commits'][2]['sha'])
+updates = []; deferred = []
+for name in sorted(set(before) | set(after)):
+    if before.get(name) == after.get(name): continue
+    if name.startswith('.github/workflows/'):
+        deferred.append(name); continue
+    if name not in after:
+        updates.append({'path':name,'mode':before[name]['mode'],'type':before[name]['type'],'sha':None})
+    else:
+        value=after[name]; assert value['type']=='blob'
+        updates.append({'path':name,'mode':value['mode'],'type':'blob','content':git('cat-file','blob',value['sha']).decode('utf-8')})
+request=urllib.request.Request('https://api.github.com/repos/'+repo+'/git/trees',data=json.dumps({'base_tree':'c0fa285432b5ce6962a7fc1328a29cafd65f5970','tree':updates}).encode(),method='POST',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json','User-Agent':'Project-Map-Source-Publication'})
+try:
+    with urllib.request.urlopen(request,timeout=60) as response: tree=json.load(response)
+except urllib.error.HTTPError as error:
+    report['publicationError']={'status':error.code,'detail':error.read(4096).decode('utf-8','replace')}
+    report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+    print(json.dumps(report['publicationError'],ensure_ascii=False)); raise SystemExit(1)
+assert tree['sha']=='e2bff9c45cf9350170b18f84a89ac6249eb9d11d','Published source differs from verified source'
+report['nonWorkflowTree']=tree['sha']; report['deferredWorkflowPaths']=deferred; report['refUpdated']=False
+report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n'); print(report_path.read_text())

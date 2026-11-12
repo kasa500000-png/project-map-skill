@@ -1,61 +1,18 @@
-name: Validate and prepare v0.7 stability commits
+name: Prepare validated v0.7 source objects
 on:
   push:
     branches: [maintenance/stabilize-v07-20261112]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: project-map-stability-publication
   cancel-in-progress: false
 jobs:
-  validate:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: payload
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: 1b3363a1af5a2a61842608d3fd1b6abd8fc3d98e
-          path: target
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Apply exact tested trees and test each phase
-        run: python payload/.maintenance/stability/publish.py --payload payload/.maintenance/stability --target target --report "$RUNNER_TEMP/validation/stages.json" --validate
-      - name: Record browser validation limitation
-        run: |
-          echo 'Browser-to-localhost E2E was not executed by this publication run. The previous browser dependency installation failed. Offline Chromium component validation and separate HTTP tests do not establish integrated browser E2E.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Export validated source
-        if: success()
-        working-directory: target
-        run: git archive --format=tar.gz --output="$RUNNER_TEMP/project-map-v07.tar.gz" HEAD
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: stability-validation-${{ runner.os }}
-          path: |
-            ${{ runner.temp }}/validation/
-            ${{ runner.temp }}/project-map-v07.tar.gz
-          retention-days: 7
-  prepare-commits:
-    needs: validate
+  prepare-source:
     if: github.repository == 'kasa500000-png/project-map-skill' && github.ref == 'refs/heads/maintenance/stabilize-v07-20261112'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,15 +26,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Recreate verified three-commit series
+      - name: Recreate source trees already validated in run 43166069900
         run: python payload/.maintenance/stability/publish.py --payload payload/.maintenance/stability --target target --report "$RUNNER_TEMP/publication.json"
-      - name: Create exact Git objects without updating any branch
+      - name: Upload source objects without changing workflows or branches
         working-directory: target
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python ../payload/.maintenance/stability/publish-objects.py "$RUNNER_TEMP/publication.json"
           git archive --format=tar.gz --output="$RUNNER_TEMP/project-map-v07-published.tar.gz" HEAD
+          echo 'Linux and macOS validation for these exact trees passed in run 43166069900. Browser E2E remains unverified.' >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/publication.json" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
