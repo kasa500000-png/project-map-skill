@@ -19,7 +19,7 @@ test('CLI passes a plan file through explicit review, execution, and linked outc
   const map = await scanProject(root);
   const task = await createTask(root, { nodeIds: ['app/page.tsx'], intent: 'display', request: '제목을 표시해줘.', snapshotId: map.snapshotId });
   const run = (...args) => JSON.parse(execFileSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8' }));
-  const proposalFile = path.join(root, '.project-map', 'draft plan.json');
+  const proposalFile = path.join(root, '.agents/project-map-state', 'draft plan.json');
   await fs.writeFile(proposalFile, JSON.stringify({ summary: '홈 제목 표시', writeFiles: ['app/page.tsx'], effects: [{ nodeId: 'app/page.tsx', change: '제목 추가', expected: '홈 제목을 볼 수 있음', verify: '실행 화면 확인' }] }));
   const planned = run('plan', '--id', task.id, '--file', proposalFile);
   assert.equal(planned.status, 'awaiting_review');
@@ -30,7 +30,7 @@ test('CLI passes a plan file through explicit review, execution, and linked outc
   assert.ok(run('wait', '--timeout', '0').tasks.some(item => item.id === task.id));
   assert.equal(run('start', '--id', task.id).status, 'running');
   await fs.appendFile(path.join(root, 'app/page.tsx'), '// requested change\n');
-  const checksFile = path.join(root, '.project-map', 'checks.json');
+  const checksFile = path.join(root, '.agents/project-map-state', 'checks.json');
   await fs.writeFile(checksFile, JSON.stringify([{ name: '기대 결과 확인', nodeId: 'app/page.tsx', status: 'not_run', detail: '실행 화면 확인 필요' }]));
   const done = run('complete', '--id', task.id, '--summary', '홈 변경 기록', '--checks-file', checksFile);
   assert.equal(done.status, 'completed');

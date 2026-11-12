@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as core from './analyzer.mjs';
+import { projectMutation, executionStatus } from './task-lock.mjs';
 import { hash, taskId, safePath, statePath, readState, writeState, problem } from './state-store.mjs';
 import { auditable, isSensitive } from './inventory.mjs';
 const location=id=>`checkpoints/${taskId(id)}.json`;
@@ -58,7 +59,8 @@ export async function restorePreview(root,task,options={}){
   const token=crypto.randomUUID(),digest=hash(JSON.stringify(files));cp.preview={token,digest,at:Date.now()};await writeState(root,location(task.id),cp,options);
   return {token,files,warning:'표시한 로컬 파일만 작업 전 상태로 되돌립니다. 외부 데이터·배포는 복원되지 않습니다. 다른 Codex 실행을 먼저 중단하세요.'};
 }
-export async function restoreApply(root,task,token,options={}){
+export async function restoreApply(root,task,token,options={}){return projectMutation(root,async()=>{if(await executionStatus(root))throw problem('실행 기록이 남아 있습니다. 실제 작업 중단을 먼저 확인하세요.','ACTIVE_CONFLICT',409);return applyRestore(root,task,token,options);});}
+async function applyRestore(root,task,token,options={}){
   const lock=await statePath(root,`locks/${taskId(task.id)}.lock`,options);try{await fs.mkdir(lock);}catch(e){if(e.code==='EEXIST')throw problem('다른 복원 작업이 진행 중입니다.','RESTORE_BUSY',409);throw e;}
   try{
     const cp=await load(root,task.id,options),files=await preflight(root,task,cp,options);

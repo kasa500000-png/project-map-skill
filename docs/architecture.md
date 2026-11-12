@@ -1,21 +1,25 @@
-# Current architecture: v0.6
+# Architecture — v0.7
 
-The original source scanner and review lifecycle remain in `analyzer.mjs`.
-`core.mjs` exports the `workspace.mjs` facade used by CLI and HTTP. The facade
-adds feature projection (`feature-map.mjs`), actual-write effects and evidence
-(`assurance.mjs`), broader change inventory (`inventory.mjs`), local checkpoint
-safety (`safety.mjs`), refresh reuse/task comparisons (`efficiency.mjs`) and the
-optional stdio client (`codex-bridge.mjs`).
+`analyzer.mjs` retains source scanning, validated plans and task records.
+`workspace.mjs` is the public workflow facade for CLI/HTTP. `task-lock.mjs` owns
+cross-process state transactions and worktree-wide modification leases.
+`finalize.mjs` prepares reconciled checks, audit and checkpoint seals before
+publishing completion; its persisted request enables retries.
 
-Default browser assets are `workbench.*` with assurance/safety/bridge UI modules.
-Original bilingual `index.html` and `app.js` remain available at `/legacy`.
-Commands are split into the public launcher and preserved `commands.mjs`.
-Version metadata is explicit. The local server only binds loopback and exposes
-bounded APIs; command evidence is an explicit CLI operation, not a free-form HTTP
-shell API. Optional Codex routes send selected task IDs and structured phases.
+`verification.mjs` separates actual current receipts from agent reports.
+`graph-review.mjs` preserves before/expected/actual functional views and artifact
+memberships. `assurance.mjs` records actual command/image evidence and broader
+inventory changes. `safety.mjs` preserves planned local files and journals restore.
+`storage.mjs` defines protected controller locations and explicit legacy migration.
+`activity.mjs` serves metadata-first polling, bounded summaries and storage usage.
 
-Safety-critical workflows still scan source freshly; unchanged snapshot reuse is
-for map refresh, not a bypass of plan approval. Plans and results are metadata,
-not access-control boundaries. Source backups and registered images add private
-local state; keep `.project-map/` out of version control. Four-phase details and
-known limitations are in `four-phase-upgrade.md` and `validation.md`.
+The optional `codex-bridge.mjs` uses `bridge-preflight.mjs` to inspect the installed
+protocol before launching a restricted, non-escalating stdio session. It treats
+model disposition, successful RPC delivery and actual verification separately.
+State changes belong to the trusted controller, not the sandboxed coding worker.
+Snapshots are reused only after content verification; changed inputs still rebuild
+the graph. No full incremental parser or automatic parallel worker scheduler.
+
+`workbench.*` is Korean-first. `/legacy` retains the older bilingual file view.
+Loopback APIs enforce Host/origin/token rules. Generated controller records,
+backups and evidence are private state, not public repository deliverables.

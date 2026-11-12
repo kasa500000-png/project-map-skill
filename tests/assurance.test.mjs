@@ -59,7 +59,7 @@ test('state symlinks and image symlinks are rejected', {skip:process.platform===
  const {root,task}=await fixture(t);await fs.symlink(path.join(root,'icon.png'),path.join(root,'alias.png'));
  await assert.rejects(()=>w.recordEvidence(root,task,{kind:'image',name:'x',stage:'before',file:'alias.png'}));
  const external=await fs.mkdtemp(path.join(os.tmpdir(),'pm-outside-'));t.after(()=>fs.rm(external,{recursive:true,force:true}));
- await fs.symlink(external,path.join(root,'.project-map','unsafe'));await assert.rejects(()=>statePath(root,'unsafe/out.json'));assert.deepEqual(await fs.readdir(external),[]);
+ await fs.symlink(external,path.join(root,'.agents/project-map-state','unsafe'));await assert.rejects(()=>statePath(root,'unsafe/out.json'));assert.deepEqual(await fs.readdir(external),[]);
 });
 test('secret-like output is redacted and generic checks are not screenshot evidence',async t=>{
  const {root,task}=await fixture(t),running=await start(root,task);const record=await w.recordEvidence(root,running,{kind:'check',name:'redaction',argv:[process.execPath,'-e','console.log("token=private_value")']});

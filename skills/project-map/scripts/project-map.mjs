@@ -8,6 +8,7 @@ import { main as commands } from './commands.mjs';
 import { getStateDir, getTask, recordEvidence } from './lib/core.mjs';
 import { readFile } from 'node:fs/promises';
 import { VERSION } from './lib/version.mjs';
+import { migrateState } from './lib/storage.mjs';
 import { startServer } from './lib/server.mjs';
 
 export async function main(argv = process.argv.slice(2)) {
@@ -16,6 +17,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`Project Map ${VERSION} — feature map → plan → review → implementation → evidence.
 Usage: node project-map.mjs COMMAND --project /path/to/app [options]
 
+  migrate-state                 Copy legacy .project-map state into protected storage
   evidence --id ID --file JSON   Record an explicit check command or PNG/JPEG
   doctor                         Check runtime and selected project
   scan [--summary]               Refresh the map
@@ -43,6 +45,7 @@ in references/plan-format.md. The agent must never approve its own plan.
     console.log(JSON.stringify({status:'listening',url:instance.url,codex:'opt-in: starts only after explicit send',projectRoot:instance.projectRoot}));
     let closing=false;for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(closing)return;closing=true;await instance.close();process.exit(0);});return instance;
   }
+  if(argv[0]==='migrate-state'){if(argv.length>3||(argv[1]&&argv[1]!=='--project')||(argv[1]&&!argv[2]))throw new Error('Use migrate-state --project PATH');console.log(JSON.stringify(await migrateState(path.resolve(argv[2]||process.cwd())),null,2));return;}
   if (argv[0] === 'evidence') {
     const args = {};
     for (let i=1;i<argv.length;i+=2) {

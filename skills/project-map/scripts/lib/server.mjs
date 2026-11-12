@@ -6,6 +6,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { scanProject, getMap, analyzeImpact, createTask, listTasks, getTask, reviewTask, getStateDir, workspaceRoute, workspaceRead, closeWorkspace } from './core.mjs';
 
+import { activity, recentTasks, storageUsage } from './activity.mjs';
+import { requireProtectedState } from './storage.mjs';
+
 const assets = fileURLToPath(new URL('../../assets/', import.meta.url));
 const routes = new Map([
   ['/', ['workbench.html', 'text/html; charset=utf-8']],
@@ -65,6 +68,7 @@ function launchBrowser(url) {
 export async function startServer({ projectRoot, stateDir, port = 0, open = false, codex = false } = {}) {
   const root = await realpath(path.resolve(projectRoot || process.cwd()));
   const options = { stateDir, codex };
+  if(codex)await requireProtectedState(root,options);
   await scanProject(root, options);
   const token = randomBytes(32).toString('hex');
   let address;
@@ -92,6 +96,9 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
         if (url.pathname === '/healthz') return reply(res, 200, { ok: true });
         if (url.pathname === '/api/session') return reply(res, 200, { token });
         if (url.pathname === '/api/map') return reply(res, 200, await getMap(root, options));
+        if(url.pathname==='/api/activity')return reply(res,200,await activity(root,options));
+        if(url.pathname==='/api/storage')return reply(res,200,await storageUsage(root,options));
+        if(url.pathname==='/api/tasks'&&url.searchParams.get('brief')==='1')return reply(res,200,await recentTasks(root,{...options,offset:url.searchParams.get('offset'),limit:url.searchParams.get('limit'),includeArchived:url.searchParams.get('archived')==='1'}));
         if (url.pathname === '/api/tasks') return reply(res, 200, { tasks: (await listTasks(root, options)).map(summarizeTask) });
         if (url.pathname.startsWith('/api/tasks/')) {
           const id = decodeURIComponent(url.pathname.slice('/api/tasks/'.length));
@@ -111,6 +118,9 @@ export async function startServer({ projectRoot, stateDir, port = 0, open = fals
         if (extra) return extra;
         if (url.pathname === '/api/refresh') return { value: await scanProject(root, options), status: 200 };
         if (url.pathname === '/api/impact') return { value: analyzeImpact(await getMap(root, options), input), status: 200 };
+        if(url.pathname==='/api/activity')return reply(res,200,await activity(root,options));
+        if(url.pathname==='/api/storage')return reply(res,200,await storageUsage(root,options));
+        if(url.pathname==='/api/tasks'&&url.searchParams.get('brief')==='1')return reply(res,200,await recentTasks(root,{...options,offset:url.searchParams.get('offset'),limit:url.searchParams.get('limit'),includeArchived:url.searchParams.get('archived')==='1'}));
         if (url.pathname === '/api/tasks') return { value: summarizeTask(await createTask(root, input, options)), status: 201 };
         const review = url.pathname.match(/^\/api\/tasks\/([^/]+)\/review$/);
         if (review) return { value: summarizeTask(await reviewTask(root, decodeURIComponent(review[1]), { ...input, source: 'dashboard' }, options)), status: 200 };

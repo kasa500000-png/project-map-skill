@@ -14,7 +14,7 @@ window.addEventListener('project-map:task', event => {
     const wrap=node('div',undefined,'table-wrap');wrap.append(table);section.append(wrap);
     if(!data.audit.complete)section.append(node('p','비교 범위가 불완전합니다. 누락 파일을 Git에서 추가 확인하세요.','info caution'));
   }
-  section.append(node('p',data.evidenceNote,'info caution'));
+  section.append(node('p',data.evidenceNote,'info caution'));if(data.evidenceCheckedAt)section.append(node('p','증거 상태 확인 시각: '+new Date(data.evidenceCheckedAt).toLocaleString('ko-KR')+' · 외부에서 코드가 바뀌었다면 새로고침하세요.','footnote'));
   const images=node('div',undefined,'evidence-grid');
   for(const item of data.evidence||[]){
     if(item.kind==='image'){

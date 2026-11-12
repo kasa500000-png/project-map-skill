@@ -3,7 +3,7 @@
  let context;
  async function connection(){
   const response=await fetch('/api/connection',{cache:'no-store'});if(!response.ok)return;const state=await response.json();
-  document.querySelector('#connection').textContent=!state.enabled?'수동 전달':state.active?'Codex · '+state.active.status:state.connected?'Codex 연결됨':'Codex · 연결 대기';
+  document.querySelector('#connection').textContent=state.diagnostics?.auth==='required'?'Codex 로그인 필요':state.diagnostics?.errorCode?'Codex 호환성·연결 확인 필요':!state.enabled?'수동 전달':state.active?'Codex · '+state.active.status:state.connected?'Codex 연결됨':'Codex · 연결 대기';
   if(!context||!context.host.isConnected)return;
   const {task,host,node,button,api,notice,reload}=context;host.replaceChildren(node('h3','Codex 연결과 작업 상태'));
   if(!state.enabled){host.append(node('p','기본은 요청문 복사 방식입니다. 직접 전송을 사용하려면 로컬 서버를 --codex 옵션으로 시작하세요.','footnote'));return;}
@@ -16,6 +16,9 @@
   }
   if(state.active)controls.append(button('현재 Codex 실행 중단',async()=>{await api('/api/codex/interrupt',{});notice('중단을 요청했습니다. interrupted/중단 상태를 확인한 뒤 재개하세요.');await connection();}));
   host.append(controls);
+  if(state.diagnostics?.message)host.append(node('p',state.diagnostics.message,'info caution'));
+  host.append(node('p','실험적 직접 연결입니다. 보호 경로의 권한 확대는 거절하며, 호환되지 않으면 요청문 복사 방식을 사용합니다.','footnote'));
+  if(!state.active)host.append(button('이 작업의 Codex 연결 기록만 초기화',async()=>{if(!confirm('앱 파일과 작업 기록은 유지하고 다음 요청을 새 Codex 대화로 시작하시겠습니까?'))return;await api('/api/codex/reset-thread',{id:task.id});notice('다음 요청에서 새 Codex 대화를 사용합니다.');}));
   for(const approval of state.approvals||[]){
    const card=node('section',undefined,'effect');card.append(node('strong','추가 권한 요청 · 이번 실행에만 적용'),node('pre',JSON.stringify(approval.detail,null,2),'prompt'));
    for(const decision of ['accept','decline'])card.append(button(decision==='accept'?'내용 확인 후 이번만 승인':'거절',async()=>{

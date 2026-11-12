@@ -40,7 +40,7 @@ test('artifact creation and removal remain explicit and are not source navigatio
 });
 test('secrets, ignored/state paths and symlinks cannot become planned artifacts',async t=>{
  const {root,task}=await fixture(t);
- for(const file of ['.env','credentials.json','.project-map/private.json','../outside.json','.agents/config.json']){
+ for(const file of ['.env','credentials.json','.agents/project-map-state/private.json','../outside.json','.agents/config.json']){
   await assert.rejects(()=>w.proposeTask(root,task.id,{summary:'invalid',writeFiles:[file],effects:[effect(file)],newNodes:[{id:file,label:'x',kind:'data'}]}));
  }
  if(process.platform!=='win32'){await fs.symlink(path.join(root,'content.json'),path.join(root,'alias.json'));await assert.rejects(()=>w.proposeTask(root,task.id,{summary:'invalid',writeFiles:['alias.json'],effects:[effect('alias.json')],newNodes:[{id:'alias.json',label:'x',kind:'data'}]}));}

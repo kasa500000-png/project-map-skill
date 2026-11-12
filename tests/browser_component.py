@@ -6,7 +6,7 @@ import json, os, pathlib, re, shutil, subprocess, tempfile
 from playwright.sync_api import sync_playwright, expect
 root = pathlib.Path(__file__).resolve().parents[1]
 fixture = pathlib.Path(tempfile.mkdtemp(prefix='pm-ui-offline-'))
-shutil.copytree(root/'examples/sample-app', fixture, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.project-map'))
+shutil.copytree(root/'examples/sample-app', fixture, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.project-map','.agents'))
 js = """import * as w from './skills/project-map/scripts/lib/workspace.mjs';
 import fs from 'node:fs/promises';import path from 'node:path';
 const root=process.argv[1],map=await w.scanProject(root),input={featureIds:['feature:src/app/reports/page.tsx'],intent:'behavior',request:'리포트 요약을 쉽게 읽도록 정리해줘.'};
@@ -32,10 +32,13 @@ try:
         page.evaluate('''data=>{window.__saved=false;window.__phase='queued';window.fetch=async(url,options={})=>{
           let value;const task=window.__phase==='approved'?{...data.planned,status:'approved'}:data[window.__phase];
           if(url==='/api/session')value={token:'offline-test'};
+          else if(url==='/api/activity')value={version:window.__phase,total:window.__saved?1:0};
+          else if(url==='/api/storage')value={files:4,bytes:2048,checkpointBytes:1024};
           else if(url==='/api/connection')value={enabled:false,connected:false,active:null,approvals:[]};
           else if(url==='/api/map'||url==='/api/refresh')value=data.map;
           else if(url==='/api/impact')value=data.impact;
           else if(url==='/api/tasks'&&options.method==='POST'){window.__saved=true;value=task;}
+          else if(url.startsWith('/api/tasks?'))value={tasks:window.__saved?[task]:[],total:window.__saved?1:0,nextOffset:null};
           else if(url==='/api/tasks')value={tasks:window.__saved?[task]:[]};
           else if(url.endsWith('/review')){window.__phase='approved';value={...data.planned,status:'approved'};}
           else if(url.startsWith('/api/tasks/'))value=task;
@@ -56,6 +59,8 @@ try:
         expect(page.locator('#task-status')).to_contain_text('승인됨')
         page.evaluate("window.__phase='done'");page.locator('#tasks button').first.click()
         page.get_by_text('테스트용 Node 실행 확인',exact=False).first.wait_for()
+        expect(page.locator('.mini-map')).to_have_count(3)
+        assert page.locator('.change-flag').count()>0
         assert page.get_by_text('되돌릴 파일 미리보기',exact=True).is_visible()
         assert page.get_by_text('다른 작업과 함께 진행할 수 있나요?',exact=True).is_visible()
         output = pathlib.Path(os.environ.get('PM_SCREENSHOT_DIR', str(fixture)))
@@ -64,7 +69,7 @@ try:
             page.set_viewport_size({'width':width,'height':height})
             dims=page.evaluate('({w:innerWidth,scroll:document.documentElement.scrollWidth})')
             assert dims['scroll']<=dims['w'],dims
-            page.screenshot(path=str(output/f'project-map-v06-{name}.png'),full_page=True)
+            page.screenshot(path=str(output/f'project-map-v07-{name}.png'),full_page=True)
         assert not errors,errors
         browser.close()
     print('PASS: offline Chromium component selection, planning, review, result/evidence/safety UI at 1440 and 390px. No live Codex or target app was used.')

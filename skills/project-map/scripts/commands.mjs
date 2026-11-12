@@ -154,7 +154,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (args['checks-file']) checks = await inputJSON(args['checks-file'], '--checks-file');
     else try { checks = args.checks ? JSON.parse(args.checks) : []; } catch { throw new Error('--checks must be a JSON array.'); }
     if (!Array.isArray(checks) || checks.some(item => !item || typeof item.name !== 'string' || !['passed', 'failed', 'not_run'].includes(item.status))) throw new Error('Each check needs name and passed / failed / not_run status.');
-    print(summarizeTask(await completeTask(projectRoot, args.id, { summary: args.summary || '', checks }, options)));
+    print(summarizeTask(await completeTask(projectRoot, args.id, { ...(args.summary !== undefined ? {summary:args.summary} : {}), ...(args.checks || args['checks-file'] ? {checks} : {}) }, options)));
     return;
   }
   throw new Error(`Unknown command: ${args.command}. Use --help.`);

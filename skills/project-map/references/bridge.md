@@ -1,48 +1,50 @@
-# Optional local Codex bridge
+# Experimental direct connection — v0.7
 
-```bash
-node "$PM_CLI" serve --project "$PROJECT_ROOT" --open --codex
-```
+Start the local host with `serve --project PATH --open --codex`. Manual copied
+prompts remain the default. The bridge never installs Codex, logs in, stores keys
+or auto-executes old tasks. Existing Codex usage/limits apply.
 
-Requires a locally installed and authenticated `codex` executable in PATH. The
-bridge runs `codex app-server` over stdio. It is disabled unless `--codex` is
-explicitly supplied. No API key is added or copied. Codex usage limits/costs apply.
+Before launching it inspects `codex --version` and the installed
+`codex app-server generate-json-schema --out TEMP` contract. Missing restricted
+read/write, structured-output or resume controls fail closed. Initialization is
+followed by `account/read` with `refreshToken:false`. Diagnostics expose only
+ready/login-required state, not account identity or credentials.
 
-## User-controlled lifecycle
+Saved thread IDs live in protected controller state. Reconnection uses
+`thread/resume`, not an unknown thread ID passed directly to `turn/start`. Every
+turn sets its own explicit sandbox and approval policy. Resetting thread linkage
+requires an idle connection and does not erase task history or source changes.
 
-Select a feature and save a request. Press the direct-plan button, then review
-the published current/expected maps. Approve the current revision and separately
-press execute. Saving/approval alone does not auto-run code. One active turn is
-allowed per bridge. During execution, supported command/file approval requests
-are shown to the user, who accepts once or declines. No session-wide permission
-amendments are issued. Planning declines escalation. Other permission requests
-receive no grants; unsupported requests return an error.
+Planning is read-only. Execution uses workspace-write, network disabled,
+restricted read roots, and excludes slash-tmp/TMPDIR write additions. Controller
+state must be under the selected project's `.agents`, protected by normal Codex
+sandbox semantics. **No sandbox escalation is accepted.** Command/file approval
+requests are declined; permission expansion receives no grants; unknown requests
+fail. An approved product plan is not permission to bypass filesystem protection.
+Use native Codex to review exceptional broader access separately.
 
-The bridge owns starting/checkpointing and completing the task. The agent returns
-schema-constrained plan or result JSON; it must not mutate Project Map state,
-self-approve, or bypass stale snapshots. Thread identity is retained while the
-server process lives. The visible progress is event-derived, not a fabricated
-percentage. Raw reasoning and account/debug stderr are not shown.
+The host owns task state, approval, checkpoints and completion. The worker returns
+structured plans or explicit outcomes: implemented, needs_review, needs_input,
+failed, cancelled. Only implemented enters finalization. A normal RPC turn end is
+not proof of task completion. A command/build report alone is not verified app
+behavior. Registered receipts and feature checks remain separate.
 
-Use interrupt for the bridge's turn. A normal/manual Codex session is separate
-and must be stopped in Codex itself. Connection failure marks execution blocked;
-it does not discard changes or claim success. Resume through a current reviewed
-plan or manual handoff. Closing the server closes its child process only.
+One modifying task runs per worktree, including separate processes and custom
+state directories. Unexpected disconnection holds an uncertain execution lease.
+Confirm the actual process has stopped before recording pause or resuming. An
+interrupt request alone is not confirmation; wait for the interrupted outcome.
+Stale plans require review. No automatic queue dispatch or parallel agents.
 
-## Security and limits
+State migration is explicit: stop old work, then `migrate-state --project PATH`.
+Old `.project-map` is copied, not removed, to `.agents/project-map-state`; existing
+destinations, symlinks and running work are refused. Ignore protected state and
+`.agents/project-map-control` in the app repository. Full-access local software
+can still change files; this is not a defense against an unrestricted local user.
 
-The HTTP server remains loopback-only with origin/host/token checks. Planning
-requests use read-only sandbox policy; execution uses workspace-write and network
-access disabled by default. Filesystem sandbox enforcement belongs to Codex and
-the OS, not to graph edges. Approving a command can still execute project code:
-review it and applicable permissions. Never use this as an untrusted hosted
-multi-tenant service. Never expose the server on a public interface.
+The adapter is protocol-tested with synthetic child processes. Live Codex account,
+installed-version/model behavior and the user's Mac GUI remain unverified.
+When unsupported, retain work and use manual handoff, never permissive fallback.
 
-The adapter uses documented `initialize`, `thread/start`, `turn/start`,
-`turn/interrupt`, item/turn notifications and command/file approval responses.
-Its protocol tests use a deterministic child process. Live Codex authentication,
-model behavior and installed-version compatibility have not been verified in
-the development environment. Fail closed and fall back to copied prompts when
-the installed version does not support the requested sandbox or schema.
-
-Official contract: https://developers.openai.com/codex/app-server
+Primary contracts checked for this implementation:
+- https://learn.chatgpt.com/docs/app-server
+- https://learn.chatgpt.com/docs/agent-approvals-security

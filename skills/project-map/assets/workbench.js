@@ -2,8 +2,8 @@
 (() => {
   const $ = s => document.querySelector(s);
   const node = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
-  const statusNames = { queued: 'Codex에 계획 요청 필요', awaiting_review: '사용자 계획 검토 대기', approved: '승인됨 · Codex 실행 필요', running: '작업 중', blocked: '중단 · 확인 필요', finalizing: '결과 정리 중', finalization_failed: '결과 정리 실패 · 재시도 필요', completed: '수정 완료 · 검증은 별도 확인', passed: '통과', failed: '실패', not_run: '미확인' };
-  let map, token, selected, impact, task, tasks = [], zoom = 1, parentTaskId;
+  const statusNames = { cancelled:'취소됨 · 파일은 유지', queued: 'Codex에 계획 요청 필요', awaiting_review: '사용자 계획 검토 대기', approved: '승인됨 · Codex 실행 필요', running: '작업 중', blocked: '중단 · 확인 필요', finalizing: '결과 정리 중', finalization_failed: '결과 정리 실패 · 재시도 필요', completed: '수정 완료 · 검증은 별도 확인', passed: '통과', failed: '실패', not_run: '미확인' };
+  let map, token, selected, impact, task, tasks = [], zoom = 1, parentTaskId, nextOffset=null, activityVersion='';
   const notice = text => { $('#notice').textContent = text; $('#notice').hidden = !text; };
   const fail = error => { $('#error').textContent = error.message; $('#error').hidden = false; };
   async function api(url, data) {
@@ -37,7 +37,7 @@
     }
     canvas.append(svg);
     for (const item of all) {
-      const p = positions.get(item.id), b = button('', () => select?.(item), 'node'); b.dataset.id = item.id; b.dataset.kind = item.kind; b.dataset.effect = effect[item.id] || (item.removed?'deleted':item.changeStatus|| (item.planned?'planned':'')); b.dataset.unexpected=String(!!item.outOfScope); b.setAttribute('aria-pressed', String(item.id === selected?.id)); b.style.left = p.x + 'px'; b.style.top = p.y + 'px';
+      const p = positions.get(item.id), b = button('', () => select?.(item), 'node'); b.dataset.id = item.id; b.dataset.kind = item.kind; b.dataset.effect = effect[item.id] || (item.removed?'deleted':item.changeStatus|| (item.planned?'planned':'')); b.dataset.unexpected=String(!!item.outOfScope); b.setAttribute('aria-pressed', String(Boolean(select) && item.id === selected?.id)); b.style.left = p.x + 'px'; b.style.top = p.y + 'px';
       b.append(node('strong', item.label), node('small', item.kind === 'shared' ? '여러 기능의 공통 부분' : `${item.files?.length || 1}개 코드 · ${item.origin === 'configured' ? '지정한 기능' : '자동 구성'}`));
       const flags=[];
       if(item.removed)flags.push('삭제');else if(item.changeStatus)flags.push(({added:'추가됨',modified:'수정됨',deleted:'삭제됨',unknown:'변경 확인 필요'})[item.changeStatus]||'변경');else if(item.planned)flags.push('수정 예정');
@@ -87,7 +87,7 @@
     if (!tasks.length) $('#tasks').append(node('p', '저장한 요청이 아직 없습니다.', 'muted'));
   }
   async function openTask(id, scroll = true) { task = await api('/api/tasks/' + encodeURIComponent(id)); renderTask(); renderTasks(); if (scroll) $('#task-section').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }); }
-  function mini(title, data) { const frame = node('section', undefined, 'mini-map'), view = node('div', undefined, 'graph-scroll'); frame.append(node('h3', title), view); graph(view, data); return frame; }
+  function mini(title, data) { const frame = node('section', undefined, 'mini-map'), view = node('div', undefined, 'graph-scroll'); frame.append(node('h3', title), node('p','가로·세로로 이동해 연결된 기능을 확인하세요.','footnote map-scroll-hint'), view); graph(view, data); return frame; }
   function renderTask() {
     if (!task) return; const t = task;
     $('#task-section').hidden = false; $('#task-title').textContent = t.request; $('#task-status').replaceChildren(badge(t.status));
@@ -95,7 +95,7 @@
     body.append(node('p', `요청 ID ${t.id}`, 'muted'));
     if (t.plan) {
       body.append(node('p', t.plan.summary, 'info'));
-      const compare = node('div', undefined, 'task-grid'); compare.append(mini('변경 전 · 계획 작성 시점', t.experience.beforeGraph), mini('승인할 예상 / 승인했던 예상', t.experience.expectedGraph)); if(t.result)compare.append(mini('작업 후 실제 결과 · 검증 상태 별도',t.experience.actualGraph)); body.append(compare);
+      const compare = node('div', undefined, 'task-grid'); compare.append(mini('변경 전 · 계획 작성 시점', t.experience.beforeGraph), mini(t.approval?'승인한 예상 구조':'승인 전 예상 구조', t.experience.expectedGraph)); if(t.result)compare.append(mini('작업 후 실제 결과 · 검증 상태 별도',t.experience.actualGraph)); body.append(compare);
       for (const effect of t.result?.outcomes || t.plan.effects) {
         const card = node('article', undefined, 'effect'); card.append(badge(effect.status || 'not_run'), node('h3', t.experience.featureLabels[effect.nodeId] || effect.nodeId), node('p', '변경: ' + effect.change), node('p', '기대 결과: ' + effect.expected), node('p', '확인 방법: ' + effect.verify)); body.append(card);
       }
@@ -123,13 +123,23 @@
       const wrap=node('div',undefined,'table-wrap');wrap.append(table);body.append(node('h3','승인한 예상과 실제 결과'),node('p',cmp.note,'footnote'),wrap);
       if(cmp.unexpected.length)body.append(node('p',`예상 밖 변경 ${cmp.unexpected.length}개: ${cmp.unexpected.map(c=>c.path).join(', ')}`,'info caution'));
     }
+    const management=node('div',undefined,'actions');
+    if(['queued','awaiting_review','approved','blocked'].includes(t.status)&&!t.experience?.safety?.uncertainExecution)management.append(button('이 요청 취소',async()=>{if(!confirm('요청을 취소합니다. 이미 수정된 앱 파일은 되돌리지 않습니다. 계속하시겠습니까?'))return;await api(`/api/tasks/${t.id}/manage`,{action:'cancel'});await openTask(t.id,false);await reloadTasks();}));
+    if(['completed','cancelled'].includes(t.status))management.append(button(t.archivedAt?'보관함에서 꺼내기':'작업 기록 보관',async()=>{await api(`/api/tasks/${t.id}/manage`,{action:t.archivedAt?'unarchive':'archive'});await openTask(t.id,false);await reloadTasks();}));
+    body.append(management);
     const prompt = node('pre', promptFor(t), 'prompt');
     body.append(button('Codex 요청문 복사', async () => { try { await navigator.clipboard.writeText(prompt.textContent); notice('복사했습니다. 현재 프로젝트의 Codex 대화에 붙여 넣으세요.'); } catch { notice('자동 복사가 안 되면 아래 요청문을 직접 선택해 복사하세요.'); } }), prompt);
     $('#task-content').replaceChildren(body);
     window.dispatchEvent(new CustomEvent('project-map:task', { detail: { task: t, body, api, button, node, notice, reload: () => openTask(t.id, false) } }));
   }
-  async function reloadTasks() { tasks = (await api('/api/tasks')).tasks; renderTasks(); }
-  $('#refresh').addEventListener('click', action(async () => { map = await api('/api/refresh', {}); renderProject(); await reloadTasks(); notice('최신 코드로 갱신했습니다. 기존 요청의 기준 시점은 유지됩니다.'); }));
+  async function reloadTasks(append=false) {
+    const result=await api(`/api/tasks?brief=1&limit=30&offset=${append?nextOffset||0:0}&archived=${$('#show-archived').checked?'1':'0'}`);
+    tasks=append?Array.from(new Map([...tasks,...result.tasks].map(t=>[t.id,t])).values()):result.tasks;nextOffset=result.nextOffset;$('#more-tasks').hidden=nextOffset===null||nextOffset===undefined;renderTasks();
+  }
+  $('#refresh').addEventListener('click', action(async () => { map = await api('/api/refresh', {}); renderProject(); await reloadTasks();if(task)await openTask(task.id,false); notice('최신 코드로 갱신했습니다. 기존 요청의 기준 시점은 유지됩니다.'); }));
+  $('#show-archived').addEventListener('change',action(()=>reloadTasks()));
+  $('#more-tasks').addEventListener('click',action(()=>reloadTasks(true)));
+  $('#storage-usage').addEventListener('click',action(async()=>{const data=await api('/api/storage');notice(`로컬 기록 ${(data.bytes/1048576).toFixed(1)} MB · ${data.files}개 파일 · 백업 ${(data.checkpointBytes/1048576).toFixed(1)} MB${data.truncated?' · 일부만 집계됨':''}. 기록이나 백업을 자동 삭제하지 않습니다.`);}));
   $('#search').addEventListener('input', () => map && renderMap());
   $('#zoom-in').addEventListener('click', () => { zoom = Math.min(1.5, zoom + .15); renderMap(); }); $('#zoom-out').addEventListener('click', () => { zoom = Math.max(.5, zoom - .15); renderMap(); });
   $('#request').addEventListener('input', () => { impact = null; $('#impact').hidden = true; $('#save').hidden = true; }); $('#intent').addEventListener('change', () => { impact = null; $('#save').hidden = true; $('#impact').hidden = true; });
@@ -145,5 +155,8 @@
     const t = await api('/api/tasks', { featureIds: [selected.id], intent: impact.intent, request: $('#request').value.trim(), snapshotId: impact.snapshotId, ...(parentTaskId ? { parentTaskId } : {}) }); parentTaskId = undefined; await reloadTasks(); await openTask(t.id); notice('요청을 저장했습니다. Codex에 계획 작성을 요청하세요.'); $('#save').hidden = true;
   } finally { $('#save').disabled = false; } }));
   action(async () => { token = (await api('/api/session')).token; map = await api('/api/map'); renderProject(); await reloadTasks(); })();
-  setInterval(() => { if (document.visibilityState !== 'visible' || !map || ['TEXTAREA','INPUT','SELECT'].includes(document.activeElement?.tagName)) return; action(async () => { await reloadTasks(); if (task) { const next = await api('/api/tasks/' + task.id); if (JSON.stringify(next) !== JSON.stringify(task)) { task = next; renderTask(); } } })(); }, 5000);
+  setInterval(() => {
+    if(document.visibilityState!=='visible'||!map||['TEXTAREA','INPUT','SELECT'].includes(document.activeElement?.tagName))return;
+    action(async()=>{const state=await api('/api/activity');if(state.version===activityVersion)return;activityVersion=state.version;await reloadTasks();if(task)await openTask(task.id,false);})();
+  },5000);
 })();

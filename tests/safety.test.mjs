@@ -35,7 +35,7 @@ test('preview token and exact current content are required',async t=>{
 });
 test('modified checkpoint blobs fail validation without touching source',async t=>{
  const {root,id}=await fixture(t);await fs.writeFile(path.join(root,'app/page.tsx'),'// changed');const task=await done(root,id),preview=await restorePreview(root,task);
- const cp=JSON.parse(await fs.readFile(path.join(root,'.project-map/checkpoints',id+'.json')));await fs.writeFile(path.join(root,'.project-map/checkpoint-blobs',cp.files[0].beforeHash),'tampered');
+ const cp=JSON.parse(await fs.readFile(path.join(root,'.agents/project-map-state/checkpoints',id+'.json')));await fs.writeFile(path.join(root,'.agents/project-map-state/checkpoint-blobs',cp.files[0].beforeHash),'tampered');
  await assert.rejects(()=>restoreApply(root,task,preview.token),/손상/);assert.equal(await fs.readFile(path.join(root,'app/page.tsx'),'utf8'),'// changed');
 });
 test('pause records state only after explicit external-stop acknowledgment and resume requires review',async t=>{

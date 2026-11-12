@@ -55,7 +55,7 @@ async function running(root, input = plan()) {
 function code(expected) { return error => error.code === expected; }
 
 async function stored(root, task) {
-  const file = path.join(root, '.project-map/tasks', task.id + '.json');
+  const file = path.join(root, '.agents/project-map-state/tasks', task.id + '.json');
   return { file, value: JSON.parse(await fs.readFile(file, 'utf8')) };
 }
 
@@ -199,7 +199,7 @@ test('plan inputs require visible effects, supported paths, and bounded explicit
     { ...plan([HOME, CARD]), effects: [effect(HOME)] },
     { ...plan(), effects: [{ ...effect(HOME), verify: '   ' }] },
     { ...plan(), writeFiles: ['../outside.ts'], effects: [effect('../outside.ts')] },
-    { ...plan(), writeFiles: ['.project-map/hidden.ts'], effects: [effect('.project-map/hidden.ts')] },
+    { ...plan(), writeFiles: ['.agents/project-map-state/hidden.ts'], effects: [effect('.agents/project-map-state/hidden.ts')] },
     { ...plan(), writeFiles: ['src/secrets/password.ts'], effects: [effect('src/secrets/password.ts')] },
     { ...plan(['new.ts']), newNodes: [] },
     { ...plan(), effects: Array.from({ length: 61 }, () => effect(HOME)) },

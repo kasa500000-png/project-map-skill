@@ -44,3 +44,43 @@ Ignored, secret-like, generated, state and symlink paths remain excluded.
 
 Validation: 126 Node tests pass, including content/image creation, modification,
 deletion, state/secret exclusions, restore and all-three-snapshot regressions.
+
+## 3. Protected controller, compatible bridge and manageable history
+
+State defaults to `.agents/project-map-state`, with a worktree coordinator under
+`.agents/project-map-control`. The direct adapter requires protected state and
+uses normal Codex sandbox exclusions without granting escalation. Migration from
+`.project-map` is explicit, copies rather than deletes, refuses active work/links/
+existing destinations, and resets previously approved work for another review.
+Previously reported-only passes are displayed as unverified historical records.
+
+The bridge checks installed schema capabilities and auth readiness before a turn,
+persists thread identity, resumes with explicit read-only defaults, and reapplies
+sandbox policy on every turn. It returns clear installation/login/compatibility
+errors. Unexpected termination retains an execution lease until the user confirms
+the external process stopped. No blanket privileges, auto login or secret copying.
+
+Task polling now uses metadata versions and bounded summary pages rather than
+redecorating all task history/source every five seconds. Tasks may be cancelled,
+archived and unarchived. Cancellation does not undo files; archive does not delete
+records. Storage usage is visible on demand. Automatic backup purging is absent.
+Oversized records cannot trap pagination on a nonadvancing cursor.
+
+Security scope: `.agents` is protected by normal native Codex sandbox semantics,
+not by hiding files or Git ignore patterns. A process running with unrestricted
+local access can still change files. The bridge stays experimental pending live
+Codex/Mac acceptance. Manual lifecycle operations need the authorized trusted host
+or user terminal; do not disable the entire sandbox to work around write errors.
+
+## Recovery checklist
+
+- `finalization_failed`: inspect the reported error, fix its cause, then retry
+  completion without replacing the saved request. Do not edit task JSON to green.
+- Unknown/disconnected execution: stop the actual process, then acknowledge pause.
+  Do not release its lease merely because a browser or connection closed.
+- `PROJECT_BUSY` after a host crash: stop all related processes, back up protected
+  state and inspect the lock owner plus task/lease journals. No automatic lock
+  expiry/PID-based deletion is performed. This release has no one-click stale-lock
+  recovery; do not delete an active lock or discard another task's work.
+- Restore conflict: preserve current files. Do not force a rollback over newer
+  work. Interrupted multi-file restores have local recovery journals.

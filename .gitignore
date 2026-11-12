@@ -9,3 +9,7 @@ coverage/
 *.key
 test-results/
 playwright-report/
+
+# Local controller records contain private requests, backups and evidence.
+.agents/project-map-state/
+.agents/project-map-control/

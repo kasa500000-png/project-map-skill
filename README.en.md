@@ -1,4 +1,4 @@
-# Project Map v0.6
+# Project Map v0.7
 
 **Choose a feature, review the impact, and develop with Codex using a visual map.**
 
@@ -49,8 +49,7 @@ authenticated Codex CLI, opt into the direct adapter:
 node skills/project-map/scripts/project-map.mjs serve --project /path/to/app --open --codex
 ```
 
-The adapter provides explicit plan/execute buttons, progress, one-shot permission
-review and interruption. No automatic queue execution or parallel agent spawning.
+The adapter provides explicit plan/execute buttons, progress, interruption and fail-closed permission handling. No automatic queue execution or parallel agent spawning.
 Codex usage limits/costs apply. Planning is read-only; execution uses workspace
 write with network disabled by default. Unsupported requests fail closed.
 See [bridge instructions](skills/project-map/references/bridge.md).
@@ -63,7 +62,7 @@ plans are compared for write/write, write/read and shared data conflicts; result
 are conditional, not proof of independence.
 
 JS/TS and React/Next.js/Expo conventions are the primary analysis targets. Dynamic
-routes and external rules may be missed. Keep `.project-map/` ignored: it holds
+routes and external rules may be missed. Keep `.agents/project-map-state/` ignored: it holds
 private requests, source backups and evidence. The server listens only on
 loopback and has no telemetry or automatic upload of the target app. Codex data
 handling follows the Codex environment used.
@@ -77,3 +76,31 @@ npm run demo
 The example is source-only, not a runnable application. The optional direct
 adapter was protocol-tested with a fake child process, not a live account/model.
 See validation notes for precise coverage. [MIT](LICENSE).
+
+
+## v0.7 migration and reliability
+
+Stop old servers and Codex work before updating. Existing projects with old
+`.project-map/tasks` need an explicit, one-time `migrate-state --project PATH`.
+The default controller state is now `.agents/project-map-state`; the global
+worktree coordinator is `.agents/project-map-control`. Ignore both in the app
+repository. Migration copies without deleting the original, refuses active work,
+links and existing destinations, and resets previously approved plans to review.
+No migration is needed for a fresh project. Do not disable the sandbox to write
+controller data; the local host owns protected lifecycle changes.
+
+Current real receipts override agent reports. Finalization prepares audit and
+checkpoint seals before publishing completion and supports retries. A persistent
+worktree lease prevents simultaneous task starts, including across processes.
+Before/expected/actual feature maps retain change flags. Safe content, image and
+configuration artifacts can participate in plans, review, evidence and rollback.
+Cancelled tasks and archived history remain available; neither action reverts
+source or purges backups. History polling is metadata-first and paginated.
+
+The experimental direct adapter checks installed CLI protocol/auth state,
+resumes saved threads and never grants sandbox escalation. Use native Codex to
+review work needing broader privileges separately. Missing explicit disposition,
+needs-review results and dropped connections do not become successful completion.
+A disconnected execution keeps its lease until actual termination is confirmed.
+These protections rely on normal Codex sandbox enforcement and do not defend
+against unrestricted local processes. Live model/account behavior remains unverified.

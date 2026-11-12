@@ -11,7 +11,8 @@ export async function beginAudit(root,task,options) { await saveAssurance(root,t
 export function writeImpact(map, plan) {
   const writes = new Set(plan.writeFiles), verify = new Set(writes), reasons = new Map(), reverse = new Map();
   for (const e of map.edges.filter(e=>e.kind!=='navigates')) { if (!reverse.has(e.target)) reverse.set(e.target,[]); reverse.get(e.target).push(e); }
-  const queue = [...writes];
+  for(const [artifact,owner] of Object.entries(plan.assetBindings||{}))if(writes.has(artifact)){verify.add(owner);reasons.set(owner,'연결된 콘텐츠·이미지·설정 파일이 바뀌므로 이 기능을 확인하세요.');}
+  const queue = [...verify];
   while (queue.length) for (const e of reverse.get(queue.shift()) || []) {
     if (!verify.has(e.source)) { verify.add(e.source);queue.push(e.source);reasons.set(e.source, `${e.target}를 사용하는 코드이므로 변경 후 확인이 필요합니다.`); }
   }
@@ -31,7 +32,7 @@ export async function auditPlan(root,task,map,options) {
 }
 export async function assertAuditFresh(root,task,options) {
   const meta = await loadAssurance(root,task.id,options);
-  if (!meta.plan) return; // Pre-upgrade requests retain the original source guard.
+  if (!meta.plan) {if(task.controlVersion>=2)throw problem('전체 파일 기준의 계획 기록이 없습니다. 계획을 다시 작성하세요.','PLAN_AUDIT_REQUIRED',409);return;} // Pre-upgrade requests retain the original source guard.
   if (meta.plan.digest!==hash(JSON.stringify(task.plan)) || meta.plan.inventory.fingerprint!==(await inventory(root,options)).fingerprint)
     throw problem('소스 또는 지도 밖 파일이 변경되었습니다. 계획을 갱신하고 다시 검토하세요.','STALE_SNAPSHOT',409);
 }
@@ -44,7 +45,7 @@ export async function finishAudit(root,task,options) {
 export async function assuranceView(root,task,options) {
   const meta=await loadAssurance(root,task.id,options), fingerprint=meta.evidence?.length ? (await inventory(root,options)).fingerprint : null;
   const evidence=(meta.evidence||[]).map(e=>({...e, current:e.fingerprint===fingerprint && e.revision===task.plan?.revision && e.stable!==false}));
-  return {impact:meta.plan?.impact || null, audit:meta.result || null, evidence,
+  return {evidenceCheckedAt:new Date().toISOString(),impact:meta.plan?.impact || null, audit:meta.result || null, evidence,
     evidenceNote:'증거가 없는 통과 기록은 에이전트 보고입니다. 캡처만으로 동작 성공이 증명되지는 않습니다.'};
 }
 const redact=text=>String(text).replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,})\b/g,'[REDACTED]').replace(/((?:token|password|secret|api[_-]?key)\s*[:=]\s*)[^\s,;]+/ig,'$1[REDACTED]').slice(-12000);

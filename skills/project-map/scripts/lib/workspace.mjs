@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as core from './analyzer.mjs';
-import { projectMutation, claimExecution, releaseExecution, assertNoOtherExecution } from './task-lock.mjs';
+import { projectMutation, claimExecution, releaseExecution, assertNoOtherExecution, markExecutionUncertain, executionStatus } from './task-lock.mjs';
 import { finalize } from './finalize.mjs';
 import { reviewGraphs } from './graph-review.mjs';
 import { buildFeatureMap, resolveSelection, suggestIntent } from './feature-map.mjs';
@@ -12,9 +12,11 @@ export { recordEvidence } from './assurance.mjs';
 import { checkpoint, sealCheckpoint, safetyView, restorePreview, restoreApply, resumePlan } from './safety.mjs';
 import { refreshMap, taskComparisons } from './efficiency.mjs';
 import { inventory } from './inventory.mjs';
+import { getStateDir, requireProtectedState } from './storage.mjs';
+import { readState, writeState } from './state-store.mjs';
 import { CodexBridge } from './codex-bridge.mjs';
 const bridges = new Map();
-const bridgeKey = (root,options) => `${path.resolve(root)}:${options.stateDir || '.project-map'}`;
+const bridgeKey = (root,options) => `${path.resolve(root)}:${getStateDir(root,options.stateDir)}`;
 
 async function configAt(root) {
   try {
@@ -45,6 +47,14 @@ export async function createTask(root, input, options = {}) {
   });
 }
 async function decorateTask(task, root, options) {
+  if(task.status==='completed'&&task.finalization?.status!=='complete'){
+    task=structuredClone(task);task.legacyReported=true;
+    const downgrade=checks=>(checks||[]).map(c=>({...c,source:'agent',status:c.status==='passed'?'not_run':c.status,detail:'이전 버전 기록 · 실행 증거 재확인 필요. '+(c.detail||'')}));
+    task.checks=downgrade(task.checks);task.verificationStatus=task.checks.some(c=>c.status==='failed')?'failed':'not_run';
+    if(task.result){task.result.checks=task.checks;task.result.verificationStatus=task.verificationStatus;
+      for(const outcome of task.result.outcomes||[]){outcome.checks=downgrade(outcome.checks);outcome.status=outcome.checks.some(c=>c.status==='failed')?'failed':'not_run';}
+    }
+  }
   const config = await configAt(root), map = await getMap(root, options);
   const assurance = await assuranceView(root, task, options);
   const graphs = reviewGraphs(task, config, assurance);
@@ -52,7 +62,7 @@ async function decorateTask(task, root, options) {
     featureLabels: Object.fromEntries(map.nodes.map(node => [node.id, map.featureGraph.nodes.filter(f => f.entryNodeIds.includes(node.id)).map(f => f.label).join(' / ') || node.label])),
     ...graphs,
     assurance,
-    safety: await safetyView(root, task, options)
+    safety: { ...await safetyView(root, task, options), uncertainExecution: (await executionStatus(root))?.uncertain || false }
   } };
   decorated.experience.parallel = await taskComparisons(root,decorated,map,options);
   return decorated;
@@ -61,6 +71,8 @@ export async function getTask(root, id, options = {}) { return decorateTask(awai
 export async function listTasks(root, options = {}) { return core.listTasks(root, options); }
 export async function proposeTask(root, id, input, options = {}) {
   return projectMutation(root, async () => {
+  const old = await core.getTask(root,id,options);
+  if(['finalizing','finalization_failed'].includes(old.status))throw Object.assign(new Error('결과 정리를 먼저 완료하세요. 새 계획으로 마무리 실패를 덮어쓸 수 없습니다.'),{code:'FINALIZATION_PENDING',statusCode:409});
   await assertNoOtherExecution(root, id, options);
   const task = await core.proposeTask(root, id, input, options);
   await auditPlan(root, task, await getMap(root, options), options);
@@ -104,13 +116,20 @@ export async function completeTask(root, id, input = {}, options = {}) {
 }
 
 export async function workspaceRoute(root, route, input, options = {}) {
+  const managed=route.match(/^\/api\/tasks\/([^/]+)\/manage$/);
+  if(managed)return projectMutation(root,async()=>{
+    if((await executionStatus(root))?.taskId===managed[1])throw Object.assign(new Error('실행 중인 작업을 먼저 중단하세요.'),{code:'PROJECT_IN_USE',statusCode:409});
+    return {value:await core.manageTask(root,managed[1],input.action,options),status:200};
+  });
   const retry = route.match(/^\/api\/tasks\/([^/]+)\/retry-finalization$/);
   if (retry) return { value: await completeTask(root, retry[1], {}, options), status: 200 };
   if (route.startsWith('/api/codex/')) {
     if(!options.codex) throw Object.assign(new Error('직접 연결은 기본으로 꺼져 있습니다. --codex로 서버를 시작하세요.'),{statusCode:403});
+    await requireProtectedState(root,options);
     const bridge = bridgeFor(root, options); let value;
     if(route==='/api/codex/run') value=await bridge.run(input.id,input.phase);
     else if(route==='/api/codex/interrupt') value=await bridge.interrupt();
+    else if(route==='/api/codex/reset-thread') value=await bridge.forget(input.id);
     else if(route==='/api/codex/decision') value=await bridge.decide(input.id,input.decision);
     else return null;
     return {value,status:200};
@@ -144,9 +163,13 @@ export async function workspaceRoute(root, route, input, options = {}) {
 // Extension points share the server's same-origin, session-token protection.
 function bridgeFor(root,options) {
   const key=bridgeKey(root,options);if(!bridges.has(key)) bridges.set(key,new CodexBridge({root,handlers:{
-    get:id=>getTask(root,id,options), fingerprint:async()=>(await inventory(root,options)).fingerprint,
+    get:id=>getTask(root,id,options), loadThread:async id=>(await readState(root,`bridge/${id}.json`,options))?.threadId, saveThread:(id,threadId)=>writeState(root,`bridge/${id}.json`,{threadId},options), fingerprint:async()=>(await inventory(root,options)).fingerprint,
     plan:(id,plan)=>proposeTask(root,id,plan,options), start:id=>updateTask(root,id,{status:'running'},options),
-    complete:(id,result)=>completeTask(root,id,result,options), block:(id,message)=>updateTask(root,id,{status:'blocked',note:String(message).slice(0,1000)},options)
+    complete:(id,result)=>completeTask(root,id,result,options), block:async(id,message,uncertain=false)=>{
+      if(uncertain)return projectMutation(root,async()=>{await markExecutionUncertain(root,id,options);return core.updateTask(root,id,{status:'blocked',note:String(message).slice(0,1000)},options);});
+      const existing=await core.getTask(root,id,options);if(['finalizing','finalization_failed'].includes(existing.status))return existing;
+      return updateTask(root,id,{status:'blocked',note:String(message).slice(0,1000)},options);
+    }
   }}));return bridges.get(key);
 }
 export async function workspaceRead(root, route, options = {}) {

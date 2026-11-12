@@ -19,7 +19,7 @@ const required = [
   'skills/project-map/scripts/lib/feature-map.mjs',
   'skills/project-map/assets/workbench.html', 'skills/project-map/assets/workbench.js',
   'skills/project-map/assets/workbench.css', 'examples/sample-app/package.json',
-  ...['state-store','inventory','assurance','safety','efficiency','codex-bridge'].map(name => `skills/project-map/scripts/lib/${name}.mjs`),
+  ...['state-store','inventory','assurance','safety','efficiency','codex-bridge','verification','finalize','task-lock','graph-review','storage','activity','bridge-preflight'].map(name => `skills/project-map/scripts/lib/${name}.mjs`),
   ...['assurance-ui','safety-ui','bridge-ui'].map(name => `skills/project-map/assets/${name}.js`),
   'skills/project-map/references/bridge.md'
 ];
@@ -36,7 +36,7 @@ if (!agent.includes('$project-map')) throw new Error('The default prompt must na
 let checked = 0;
 async function visit(folder) {
   for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
-    if (['.git', 'node_modules', '.project-map', 'examples'].includes(entry.name)) continue;
+    if (['.git', 'node_modules', '.project-map', '.agents', 'examples'].includes(entry.name)) continue;
     const file = path.join(folder, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`Unexpected packaged symlink: ${path.relative(root, file)}`);
     if (entry.isDirectory()) await visit(file);

@@ -153,11 +153,11 @@ test('startup atomically replaces a metadata symlink without modifying its targe
   const { root, instance } = await fixture(t, async ({ arena, root: project }) => {
     outside = path.join(arena, 'outside.json');
     await fs.writeFile(outside, 'DO_NOT_CHANGE');
-    await fs.mkdir(path.join(project, '.project-map'));
-    await fs.symlink(outside, path.join(project, '.project-map/server.json'));
+    await fs.mkdir(path.join(project, '.agents/project-map-state'), {recursive:true});
+    await fs.symlink(outside, path.join(project, '.agents/project-map-state/server.json'));
   });
   assert.equal(await fs.readFile(outside, 'utf8'), 'DO_NOT_CHANGE');
-  const infoPath = path.join(root, '.project-map/server.json');
+  const infoPath = path.join(root, '.agents/project-map-state/server.json');
   assert.equal((await fs.lstat(infoPath)).isSymbolicLink(), false);
   assert.equal(JSON.parse(await fs.readFile(infoPath, 'utf8')).url, instance.url);
 });
@@ -166,7 +166,7 @@ test('shutdown never follows or deletes a replacement metadata symlink', { skip:
   const { arena, root, instance } = await fixture(t);
   const outside = path.join(arena, 'outside.json');
   await fs.writeFile(outside, JSON.stringify({ pid: process.pid, url: instance.url, keep: true }));
-  const infoPath = path.join(root, '.project-map/server.json');
+  const infoPath = path.join(root, '.agents/project-map-state/server.json');
   await fs.unlink(infoPath);
   await fs.symlink(outside, infoPath);
   await instance.close();

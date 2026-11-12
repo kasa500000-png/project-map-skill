@@ -29,7 +29,7 @@ async function tempProject(t, prefix = 'project-map-core-') {
 async function fixture(t, { useGit = false } = {}) {
   const root = await tempProject(t);
   if (useGit) git(root, 'init', '-q');
-  await write(root, '.gitignore', '.project-map/\nignored.ts\nnode_modules/\n.env*\n');
+  await write(root, '.gitignore', '.agents/project-map-state/\nignored.ts\nnode_modules/\n.env*\n');
   await write(root, 'package.json', JSON.stringify({ name: 'fixture-app' }));
   await write(root, 'tsconfig.json', '{ // Local alias\n "compilerOptions": {"baseUrl":".", "paths":{"@/*":["src/*"],},},}\n');
   await write(root, 'src/app/tasks/page.tsx', "import { TaskCard } from '@/components/TaskCard';\nexport default function Tasks(){ return <TaskCard />; }\n");
@@ -72,7 +72,7 @@ test('maps actual files, resolves imports and aliases, and keeps feature labels 
   assert.ok(map.edges.some(edge => edge.source === detail.id && edge.target === 'src/components/TaskCard.tsx'));
   assert.equal((await getMap(root)).snapshotId, map.snapshotId);
   assert.equal((await scanProject(root)).snapshotId, map.snapshotId, 'state creation must not change the source snapshot');
-  assert.ok(!(await fs.readFile(path.join(root, '.project-map/map.json'), 'utf8')).includes('SOURCE_BODY_MUST_NOT_BE_PERSISTED'));
+  assert.ok(!(await fs.readFile(path.join(root, '.agents/project-map-state/map.json'), 'utf8')).includes('SOURCE_BODY_MUST_NOT_BE_PERSISTED'));
 });
 
 test('Git discovery excludes ignored, secret-like, and generated paths', async t => {
@@ -235,8 +235,9 @@ test('symlinked state or task directories cannot redirect writes outside the pro
     const root = path.join(arena, mode);
     await fs.mkdir(root);
     await write(root, 'main.ts', 'export const value = 1;');
-    if (mode === 'state') await fs.symlink(external, path.join(root, '.project-map'));
-    else { await fs.mkdir(path.join(root, '.project-map')); await fs.symlink(external, path.join(root, '.project-map/tasks')); }
+    await fs.mkdir(path.join(root,'.agents'),{recursive:true});
+    if (mode === 'state') await fs.symlink(external, path.join(root, '.agents/project-map-state'));
+    else { await fs.mkdir(path.join(root, '.agents/project-map-state'), {recursive:true}); await fs.symlink(external, path.join(root, '.agents/project-map-state/tasks')); }
     await assert.rejects(() => scanProject(root), error => error.code === 'UNSAFE_STATE_PATH');
   }
   assert.deepEqual(await fs.readdir(external), []);
@@ -245,7 +246,7 @@ test('symlinked state or task directories cannot redirect writes outside the pro
 test('persisted map and task validation reject forged paths, roots, and baseline hashes', async t => {
   const root = await fixture(t);
   const task = await queued(root);
-  const taskPath = path.join(root, '.project-map/tasks', `${task.id}.json`);
+  const taskPath = path.join(root, '.agents/project-map-state/tasks', `${task.id}.json`);
   const original = JSON.parse(await fs.readFile(taskPath, 'utf8'));
   for (const mutate of [
     value => { value.projectRoot = path.dirname(root); },
@@ -259,7 +260,7 @@ test('persisted map and task validation reject forged paths, roots, and baseline
   }
   await fs.writeFile(taskPath, JSON.stringify(original));
   assert.equal((await listTasks(root)).length, 1);
-  const mapPath = path.join(root, '.project-map/map.json');
+  const mapPath = path.join(root, '.agents/project-map-state/map.json');
   const map = JSON.parse(await fs.readFile(mapPath, 'utf8'));
   map.nodes[0].files = ['/etc/passwd'];
   await fs.writeFile(mapPath, JSON.stringify(map));

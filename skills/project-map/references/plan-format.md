@@ -25,7 +25,7 @@ pretend to understand arbitrary natural-language changes.
 ```
 
 Write the JSON with file-editing tools, for example to the project's ignored
-`.project-map/draft-plan.json`. Then call:
+`.agents/project-map-state/draft-plan.json`. Then call:
 
 ```bash
 node "$PM_CLI" plan --project "$PROJECT_ROOT" --id TASK_ID --file PLAN_JSON
@@ -65,7 +65,7 @@ not a screenshot of a running app or evidence that the change works.
 
 ## Review and execution
 
-Requests move through `queued → awaiting_review → approved → running → completed`.
+Requests move through `queued → awaiting_review → approved → running → finalizing → completed`.
 Revision feedback returns the request to `queued`. Publishing a new plan clears
 earlier approval. Each review identifies the exact `revision` and `snapshotId`.
 Source changes invalidate review before execution.
@@ -103,3 +103,25 @@ Only change `not_run` after performing the relevant check. A generic build
 check has no `nodeId` unless it actually establishes that specific expected
 result. Unlinked checks do not mark every feature as passed. Completion records
 actual source differences separately from the per-feature outcome checks.
+
+
+## Content and image artifacts (v0.7)
+
+`writeFiles` also accepts safe, eligible content and configuration artifacts:
+JSON/JSONL/CSV, YAML, XML/plist, PNG/JPEG/WebP/SVG/ICO/AVIF/GIF, text/Markdown,
+lock/TOML/Gradle and `.gitignore`. Source-map coverage remains unchanged. Existing
+artifacts are represented only in the plan. For a new artifact, add a `newNodes`
+entry such as `{ "id":"content/questions.json", "label":"문제 콘텐츠", "kind":"data" }`.
+Every planned file still needs an effect. Optional
+`"assetBindings": { "content/questions.json": "src/app/questions/page.tsx" }`
+links it to an existing source feature. This is declared membership, not detected
+runtime evidence. Sensitive, ignored, generated, state and symbolic-link paths
+remain refused. Backups are bounded to 20 MB per regular file; external resources
+are never restored. The direct bridge represents bindings as an `artifactLinks`
+array of `{file,nodeId}` then converts it to the same validated format.
+
+A failed finalization stays `finalization_failed` and keeps its execution lease.
+Fix the cause and retry completion; never fabricate `completed`. A pass supplied
+in `checks` is an agent report unless matched with actual current evidence. Reports
+cannot override a real failure. Check names/node IDs identify reruns, so keep them
+consistent. Cancellation and archiving retain task records and source changes.

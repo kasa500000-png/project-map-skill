@@ -8,6 +8,7 @@ function finish(status='completed'){
  send({method:'item/completed',params:{threadId:thread,turnId:turn,item:{type:'agentMessage',phase:'final_answer',text:JSON.stringify(result)}}});send({method:'turn/completed',params:{threadId:thread,turn:{id:turn,status}}});}
 readline.createInterface({input:process.stdin}).on('line',line=>{const x=JSON.parse(line);fs.appendFileSync(process.env.PM_TEST_LOG,JSON.stringify(x)+'\\n');
  if(x.method==='initialize')send({id:x.id,result:{userAgent:'test'}});
+ else if(x.method==='account/read')send({id:x.id,result:{account:{type:'chatgpt'},requiresOpenaiAuth:true}});
  else if(x.method==='thread/start')send({id:x.id,result:{thread:{id:thread}}});
  else if(x.method==='turn/start'){turn='turn-'+x.id;phase=x.params.sandboxPolicy.type==='readOnly'?'plan':'execute';send({id:x.id,result:{turn:{id:turn}}});
  setTimeout(()=>{if(mode==='hang')return;if(mode==='disconnect')process.exit(0);
@@ -22,7 +23,7 @@ async function until(fn){for(let i=0;i<150;i++){if(fn())return;await new Promise
 async function fixture(t,mode='success',status='queued'){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'pm-bridge-')));const file=path.join(root,'mock.mjs'),log=path.join(root,'wire.jsonl');await fs.writeFile(file,mock);
  const events=[],task={id:'task-00000000-0000-4000-8000-000000000001',status,request:'Change title',nodeIds:['app/page.tsx'],impact:{writeFiles:['app/page.tsx']},...(status==='approved'?{plan:{summary:'approved',writeFiles:['app/page.tsx'],effects:[]}}:{})};let fingerprint='same';
- const bridge=new CodexBridge({root,spawnProcess:()=>spawn(process.execPath,[file],{cwd:root,stdio:['pipe','pipe','pipe'],env:{...process.env,PM_TEST_MODE:mode,PM_TEST_LOG:log}}),handlers:{get:async()=>task,fingerprint:async()=>fingerprint,plan:async(id,p)=>{events.push(['plan',p]);task.status='awaiting_review';},start:async()=>{events.push(['start']);task.status='running';},complete:async(id,p)=>{events.push(['complete',p]);task.status='completed';},block:async()=>{events.push(['blocked']);task.status='blocked';}}});
+ const bridge=new CodexBridge({root,preflight:async()=>({version:'mock',compatible:true}),spawnProcess:()=>spawn(process.execPath,[file],{cwd:root,stdio:['pipe','pipe','pipe'],env:{...process.env,PM_TEST_MODE:mode,PM_TEST_LOG:log}}),handlers:{get:async()=>task,fingerprint:async()=>fingerprint,plan:async(id,p)=>{events.push(['plan',p]);task.status='awaiting_review';},start:async()=>{events.push(['start']);task.status='running';},complete:async(id,p)=>{events.push(['complete',p]);task.status='completed';},block:async()=>{events.push(['blocked']);task.status='blocked';}}});
  t.after(async()=>{await bridge.close();await fs.rm(root,{recursive:true,force:true});});return {bridge,events,task,log,setFingerprint:value=>{fingerprint=value;}};
 }
 test('stdio handshake publishes a structured plan under read-only policy without self approval',async t=>{
@@ -36,10 +37,11 @@ test('explicit approved execution preserves sandbox and returns unverified check
  const {bridge,task,events,log}=await fixture(t,'success','approved');await bridge.run(task.id,'execute');await until(()=>!bridge.active);assert.equal(task.status,'completed');assert.equal(events[0][0],'start');assert.equal(events[1][1].checks[0].status,'not_run');
  const turn=(await fs.readFile(log,'utf8')).trim().split('\n').map(JSON.parse).find(x=>x.method==='turn/start');assert.equal(turn.params.sandboxPolicy.type,'workspaceWrite');assert.equal(turn.params.sandboxPolicy.networkAccess,false);
 });
-test('permission prompts require explicit one-shot approval and unsupported policies are refused',async t=>{
- const {bridge,task,events,log}=await fixture(t,'approval','approved');await bridge.run(task.id,'execute');await until(()=>bridge.approvals.size);assert.equal(events.some(e=>e[0]==='complete'),false);
- await assert.rejects(()=>bridge.decide('900','acceptForSession'));await bridge.decide('900','accept');await until(()=>!bridge.active);assert.equal(task.status,'completed');
- assert.ok((await fs.readFile(log,'utf8')).includes('"decision":"accept"'));
+test('execution privilege requests are declined rather than escaping protected controller state',async t=>{
+ const {bridge,task,events,log}=await fixture(t,'approval','approved');await bridge.run(task.id,'execute');await until(()=>!bridge.active);
+ assert.equal(events.some(e=>e[0]==='complete'),false);assert.equal(task.status,'blocked');
+ await assert.rejects(()=>bridge.decide('900','accept'),e=>e.code==='ESCALATION_DISABLED');
+ assert.ok((await fs.readFile(log,'utf8')).includes('"decision":"decline"'));
 });
 test('planning cannot escalate and permission-expansion requests receive no grants',async t=>{
  const first=await fixture(t,'readonly-approval');await first.bridge.run(first.task.id,'plan');await until(()=>!first.bridge.active);assert.ok((await fs.readFile(first.log,'utf8')).includes('"decision":"decline"'));
@@ -63,5 +65,5 @@ test('changing source while planning rejects the stale model plan',async t=>{
 test('file approval cannot expand a grant outside the project through traversal',async t=>{
  const {bridge,task}=await fixture(t,'hang','approved');await bridge.run(task.id,'execute');
  await bridge.message({id:77,method:'item/fileChange/requestApproval',params:{threadId:bridge.active.threadId,turnId:bridge.active.turnId,grantRoot:path.join(bridge.root,'..','outside')}});
- await assert.rejects(()=>bridge.decide('77','accept'),/프로젝트 밖/);await bridge.decide('77','decline');
+ await assert.rejects(()=>bridge.decide('77','accept'),e=>e.code==='ESCALATION_DISABLED');assert.equal(bridge.approvals.size,0);
 });

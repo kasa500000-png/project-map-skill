@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { getStateDir, guardLegacyState } from './storage.mjs';
 export const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 export const problem = (message, code = 'INVALID_INPUT', statusCode = 400) => Object.assign(new Error(message), { code, statusCode });
 export function taskId(id) {
@@ -23,7 +24,7 @@ export async function safePath(root, relative, missing = false) {
   return current;
 }
 export async function stateRoot(root, options = {}) {
-  const project = await fs.realpath(root), state = path.resolve(project, options.stateDir || '.project-map');
+  const project = await fs.realpath(root);await guardLegacyState(project,options.stateDir);const state = getStateDir(project,options.stateDir);
   if (state === project) throw problem('State must be separate from source.');
   for (let p = state; p !== path.dirname(p); p = path.dirname(p)) {
     try { const s = await fs.lstat(p); if (s.isSymbolicLink() || !s.isDirectory()) throw problem('Unsafe state directory.', 'UNSAFE_STATE_PATH'); }

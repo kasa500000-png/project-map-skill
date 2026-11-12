@@ -1,26 +1,44 @@
-# Current integration (v0.6)
+# Local integration — v0.7
 
-Default: loopback browser plus explicit copied request prompts in Codex. Optional:
-`serve --codex` uses the local CLI App Server; read [bridge.md](bridge.md) first.
-The public launcher also exposes `evidence --id ID --file SPEC_JSON` for explicit
-command receipts or registered PNG/JPEG images. No HTTP endpoint accepts arbitrary
-shell text. Optional Codex execution itself is requested by task ID/phase and
-retains user review and sandbox/permission handling.
+Default: loopback browser and explicit copied request prompts. Optional
+`serve --codex` starts an experimental, non-escalating stdio adapter; read bridge.md.
+No HTTP endpoint accepts arbitrary shell commands. Evidence commands are explicit
+local CLI actions that execute project code under normal user authorization.
 
-Additional same-origin/session-protected POST routes:
-`/api/features/rename`, `/api/tasks/ID/pause`, `/api/tasks/ID/resume-plan`,
-`/api/tasks/ID/restore-preview`, `/api/tasks/ID/restore-apply`, and optional
-`/api/codex/run`, `/api/codex/interrupt`, `/api/codex/decision`.
-GET `/api/connection` reports mode and progress. GET `/api/evidence/ID/EVIDENCE_ID`
-serves only registered hash-checked raster images. Generated project state,
-backups and evidence must remain private and ignored.
+## Commands
 
-The server's direct adapter is opt-in. Code execution, approval, backup and
-verification are separate states. Restore does not undo external systems.
-Official App Server contract: https://developers.openai.com/codex/app-server
+`doctor`, `scan [--summary]`, `serve [--open] [--codex]`, `impact --node PATH`,
+`tasks`, `task --id ID`, `plan --id ID --file JSON`,
+`review --id ID --decision approve|revise --revision N --snapshot ID`,
+`start --id ID`, `complete --id ID [--summary TEXT] [--checks-file JSON]`,
+`evidence --id ID --file JSON`, `wait --timeout 50`, `migrate-state --project PATH`.
 
-CLI lifecycle remains: `doctor`, `scan`, `serve`, `impact`, `tasks`, `task`,
-`plan --file PLAN_JSON`, `review --decision approve|revise --revision N --snapshot ID`,
-`start`, `complete --checks-file CHECKS_JSON`, `wait --timeout 50`.
-Use the exact help from the installed public launcher; node IDs are relative source
-paths. Quote paths safely. Do not interpolate untrusted task text into shell code.
+An empty completion retry reuses the saved request. Use the installed launcher's
+help. Quote paths safely; never interpolate untrusted task text as shell code.
+Node IDs are relative paths; source code and ordinary artifact IDs may appear in
+plans. New artifacts need a planned node. Use plan-format.md for exact schemas.
+
+## HTTP
+
+All mutation routes retain same-origin/Host/token checks and JSON limits.
+- Feature rename; plan review; retry-finalization.
+- Pause (actual stop acknowledgment); resume-plan; restore-preview; restore-apply.
+- `/api/tasks/ID/manage`: cancel, archive, unarchive. No purge operation.
+- Optional `/api/codex/run`, interrupt, reset-thread. Extra privilege approval is
+  refused, not silently granted.
+
+`/api/tasks?brief=1&offset=0&limit=30&archived=1` provides bounded history summaries.
+`/api/activity` returns a metadata version for polling, not source content.
+`/api/storage` returns on-demand byte counts without deleting backups.
+`/api/connection` reports opt-in mode, compatibility/auth diagnostics and progress.
+Only registered hash-checked PNG/JPEG artifacts are served at `/api/evidence/...`.
+
+Controller state is `.agents/project-map-state`; project-wide coordination is
+`.agents/project-map-control`. Both must remain ignored/private. Migration from
+old `.project-map` is explicit and retains the original. Custom state locations
+remain available for trusted manual workflows; direct execution refuses an
+unprotected location. Lifecycle calls must come from the trusted controller/host,
+not a coding worker that has write access to its own approvals.
+
+Saving, approving, running, finalizing, verified, reported and unverified are
+distinct states. Restore affects planned local files, not external systems.

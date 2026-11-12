@@ -7,7 +7,7 @@ test('unchanged content reuses validated map, changed content rebuilds relations
  await fs.writeFile(path.join(root,'app/page.tsx'),'export default function Edit(){return null;}');const changed=await refreshMap(root);assert.equal(changed.refresh.mode,'rebuilt');assert.ok(changed.refresh.changedFiles.includes('app/page.tsx'));assert.notEqual(changed.snapshotId,first.snapshotId);
 });
 test('file additions, deletions, config and Git head changes invalidate map reuse',async t=>{
- const root=await fixture(t);execFileSync('git',['-C',root,'init','-q']);await fs.writeFile(path.join(root,'.gitignore'),'.project-map/\n');await refreshMap(root);
+ const root=await fixture(t);execFileSync('git',['-C',root,'init','-q']);await fs.writeFile(path.join(root,'.gitignore'),'.agents/project-map-state/\n');await refreshMap(root);
  await fs.writeFile(path.join(root,'app/second.tsx'),'export const x=1;');assert.equal((await refreshMap(root)).refresh.mode,'rebuilt');await fs.unlink(path.join(root,'app/second.tsx'));assert.equal((await refreshMap(root)).refresh.mode,'rebuilt');
  execFileSync('git',['-C',root,'add','.']);execFileSync('git',['-C',root,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial']);assert.equal((await refreshMap(root)).refresh.mode,'rebuilt');
  await fs.writeFile(path.join(root,'project-map.config.json'),'{"name":"Renamed"}');assert.equal((await refreshMap(root)).project.name,'Renamed');

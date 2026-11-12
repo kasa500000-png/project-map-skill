@@ -5,6 +5,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { detectNavigation, normalizeRoute } from './flow.mjs';
 import { inventory, auditable, isSensitive } from './inventory.mjs';
+import { getStateDir, guardLegacyState } from './storage.mjs';
+export { getStateDir } from './storage.mjs';
 
 const exec = promisify(execFile);
 const SCHEMA_VERSION = 1;
@@ -62,15 +64,8 @@ async function projectPath(projectRoot) {
   return root;
 }
 
-export function getStateDir(projectRoot, stateDir) {
-  const root = path.resolve(projectRoot);
-  if (stateDir !== undefined && (typeof stateDir !== 'string' || !stateDir.trim())) throw failure('stateDir must be a nonempty path.');
-  const result = path.resolve(root, stateDir ?? '.project-map');
-  if (result === root) throw failure('State directory must be separate from the project root.');
-  return result;
-}
-
 async function ensureState(root, stateDir) {
+  await guardLegacyState(root,stateDir);
   const state = getStateDir(root, stateDir);
   // Refuse symlinked state paths rather than writing through a project-controlled link.
   const ancestors = [];
@@ -542,7 +537,7 @@ function validReview(review) {
 
 function validateStoredTask(task, id, root, state) {
   const invalid = () => { throw failure('Task contains invalid project metadata, plan, approval, or paths. Create a fresh task from the current map.', 'INVALID_STATE'); };
-  if (!plainObject(task) || task.schemaVersion !== SCHEMA_VERSION || task.id !== id || task.projectRoot !== root || !Array.isArray(task.baseline) || task.baseline.length > MAX_FILES || !['queued', 'awaiting_review', 'approved', 'running', 'blocked', 'finalizing', 'finalization_failed', 'completed'].includes(task.status) || !INTENTS.has(task.intent) || typeof task.request !== 'string' || !task.request.trim() || task.request.length > 6000 || typeof task.snapshotId !== 'string' || !/^[0-9a-f]{32}$/.test(task.snapshotId) || !Number.isFinite(Date.parse(task.createdAt)) || !Number.isFinite(Date.parse(task.updatedAt))) invalid();
+  if (!plainObject(task) || task.schemaVersion !== SCHEMA_VERSION || task.id !== id || task.projectRoot !== root || !Array.isArray(task.baseline) || task.baseline.length > MAX_FILES || !['queued', 'awaiting_review', 'approved', 'running', 'blocked', 'finalizing', 'finalization_failed', 'cancelled', 'completed'].includes(task.status) || !INTENTS.has(task.intent) || typeof task.request !== 'string' || !task.request.trim() || task.request.length > 6000 || typeof task.snapshotId !== 'string' || !/^[0-9a-f]{32}$/.test(task.snapshotId) || !Number.isFinite(Date.parse(task.createdAt)) || !Number.isFinite(Date.parse(task.updatedAt))) invalid();
   if (task.reviewRequired !== undefined && task.reviewRequired !== true) invalid();
   if (task.parentTaskId !== undefined) { try { validTaskId(task.parentTaskId); } catch { invalid(); } if (task.parentTaskId === id) invalid(); }
   if (task.startedAt !== undefined && !Number.isFinite(Date.parse(task.startedAt))) invalid();
@@ -717,7 +712,7 @@ export async function createTask(projectRoot, input, options = {}) {
     if (parent.status !== 'completed') throw failure('Follow-up work must reference a completed task in this project.', 'INVALID_PARENT_TASK', 409);
   }
   const impact = analyzeImpact(map, input), state = await ensureState(root, options.stateDir), now = new Date().toISOString();
-  const task = { schemaVersion: SCHEMA_VERSION, id: 'task-' + crypto.randomUUID(), status: 'queued', reviewRequired: true, approval: null, createdAt: now, updatedAt: now, request: input.request.trim(), nodeIds: impact.nodeIds, intent: impact.intent, impact, snapshotId: map.snapshotId, projectRoot: root, baseline: map.files.map(({ path: filePath, hash }) => ({ path: filePath, hash })), baselineNodes: map.nodes, baselineEdges: map.edges, baselineCoverage: map.coverage, baselineGitHead: map.project.git.head, checks: [], verificationStatus: 'not_run', ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}) };
+  const task = { schemaVersion: SCHEMA_VERSION, id: 'task-' + crypto.randomUUID(), status: 'queued', controlVersion: 2, reviewRequired: true, approval: null, createdAt: now, updatedAt: now, request: input.request.trim(), nodeIds: impact.nodeIds, intent: impact.intent, impact, snapshotId: map.snapshotId, projectRoot: root, baseline: map.files.map(({ path: filePath, hash }) => ({ path: filePath, hash })), baselineNodes: map.nodes, baselineEdges: map.edges, baselineCoverage: map.coverage, baselineGitHead: map.project.git.head, checks: [], verificationStatus: 'not_run', ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}) };
   await atomicJSON(path.join(state, 'tasks', task.id + '.json'), task);
   return task;
 }
@@ -747,7 +742,7 @@ export async function proposeTask(projectRoot, id, input, options = {}) {
   if (!plainObject(input) || Object.keys(input).some(key => !['summary', 'writeFiles', 'effects', 'newNodes', 'removeNodeIds', 'flowChanges', 'assetBindings'].includes(key))) throw failure('Plan input may contain summary, writeFiles, effects, newNodes, removeNodeIds, and flowChanges only.');
   if (!boundedText(input.summary, 4000)) throw failure('A plan needs a clear summary of at most 4000 characters.');
   const root = await projectPath(projectRoot), state = await ensureState(root, options.stateDir), task = await getTask(root, id, options);
-  if (task.status === 'completed') throw failure('A completed task cannot be replanned. Create a follow-up request.', 'TASK_COMPLETED', 409);
+  if (['completed','cancelled'].includes(task.status)) throw failure('A completed or cancelled task cannot be replanned. Create a follow-up request.', 'TASK_COMPLETED', 409);
   const map = await scanProject(root, options);
   if (!task.plan && !task.startedAt && task.status !== 'blocked' && map.snapshotId !== task.snapshotId) throw failure('The project changed before its first plan. Create a fresh request from the current map.', 'STALE_SNAPSHOT', 409);
   if (!validPlanPaths(input.writeFiles, root, state, undefined, MAX_PLAN_ITEMS)) throw failure('writeFiles must contain at most 60 unique safe source/artifact paths; use an empty array for verification-only work.');
@@ -934,4 +929,20 @@ export async function publishCompletion(projectRoot, id, candidate, options = {}
   validateStoredTask(next, id, root, state);
   await atomicJSON(path.join(state, 'tasks', id + '.json'), next);
   return next;
+}
+
+
+export async function manageTask(projectRoot,id,action,options={}) {
+  if(!['cancel','archive','unarchive'].includes(action))throw failure('Invalid task-management action.');
+  const root=await projectPath(projectRoot),state=await ensureState(root,options.stateDir),task=await getTask(root,id,options);
+  let next={...task,updatedAt:new Date().toISOString()};
+  if(action==='cancel') {
+    if(!['queued','awaiting_review','approved','blocked'].includes(task.status))throw failure('Stop active execution before cancelling.', 'INVALID_TRANSITION',409);
+    next.status='cancelled';next.approval=null;next.cancelledAt=next.updatedAt;
+  } else {
+    if(!['completed','cancelled'].includes(task.status))throw failure('Only terminal tasks may be archived.', 'INVALID_TRANSITION',409);
+    if(action==='archive')next.archivedAt=next.updatedAt;else delete next.archivedAt;
+  }
+  validateStoredTask(next,id,root,state);
+  await atomicJSON(path.join(state,'tasks',id+'.json'),next);return next;
 }
